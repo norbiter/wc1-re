@@ -1,0 +1,517 @@
+/* Fork-only: draw ships from point-cloud models instead of blitting the
+ * 37 pre-rendered sprite views.
+ *
+ * The models are binary PLY files named SHIP_Vnn.ply or SHIPTYPE_Vnn.ply,
+ * where nn is the ObjectType whose retail resource is SHIP.Vnn or
+ * SHIPTYPE.Vnn.  Each vertex is
+ * x y z nx ny nz (float) r g b views (uchar).  The model frame is nose = -z,
+ * up = +y, one unit = one sprite pixel at screen scale 0x100.  Next to each
+ * PLY sits a .light sidecar made by bin/ship3dLight.py from the model's .npz.
+ *
+ * The game's own frames are right/down/forward with a 0x100 unit length (the
+ * projection adds view-space y straight onto the screen row), so a model
+ * point (x, y, z) is the game-frame point (x, -y, -z).  That is a proper
+ * rotation, so no mirroring is involved.
+ *
+ * Relighting follows ship3d/README.md.  The sprites were shaded by a
+ * headlight, and the delighting fitted that shading per hue bank, so
+ *
+ *     lum = albedo + b[bank] * (clip(n.L, 0, 1) - c)
+ *
+ * gives the brightness under any light L, and the point is drawn with the
+ * palette index of that brightness inside its hue bank.  The result is a
+ * palette index, not RGB, so the game's own palette fades act on ships as
+ * they do on sprites.
+ *
+ * Points are splatted into the 8-bit space buffer with a per-ship depth
+ * buffer. */
+#include "wc1.h"
+
+#include "video_internal.h"
+
+#define SHIP3D_TYPE_COUNT 64
+#define SHIP3D_PLY_STRIDE 28
+#define SHIP3D_MAX_VIEWPORT_PIXELS (640 * 480)
+
+/* The cloud is the surface of a voxel grid with a pitch of exactly one unit,
+ * and each point is a voxel centre.  Drawing every point as its voxel's
+ * projected footprint (the screen bounding box of a unit cube, which depends
+ * on orientation) covers the voxel shell's silhouette with no seams at any
+ * range or angle.  The carved shells do have a few single-voxel gaps of their
+ * own, which the exact footprint cannot cover; growing it by half again
+ * closed them in every case measured (random orientations, scales 1-3, five
+ * models) for about 7% more silhouette area. */
+#define SHIP3D_FOOTPRINT 1.5f
+
+#define SHIP3D_BANK_COUNT 16
+#define SHIP3D_LUT_SIZE 1024 /* brightness in quarter units, 0..255.75 */
+
+typedef struct Ship3dPoint {
+    float x;
+    float y;
+    float z;
+    float nx;
+    float ny;
+    float nz;
+    float albedo;
+    signed char bank;           /* hue bank; -1 = grey fill, never shaded */
+    unsigned char fixedIndex;   /* palette index used when bank == -1 */
+} Ship3dPoint;
+
+typedef struct Ship3dModel {
+    Ship3dPoint *points;
+    int count;
+    int tried;
+    float reference;            /* c: n.v at which a point shows its albedo */
+    float slope[SHIP3D_BANK_COUNT]; /* b: brightness per unit n.v, per bank */
+    unsigned char lut[SHIP3D_BANK_COUNT][SHIP3D_LUT_SIZE];
+} Ship3dModel;
+
+static char g_szShip3dDirectory[1024];
+static int g_bShip3dEnabled;
+static Ship3dModel g_aShip3dModels[SHIP3D_TYPE_COUNT];
+static float *g_pfShip3dDepth;
+static int g_nShip3dDepthPixels;
+
+void SdlShip3dEnable(const char *directory)
+{
+    const char *path;
+
+    path = directory != NULL && directory[0] != '\0' ? directory : "ship3d";
+#ifndef _WIN32
+    if (realpath(path, g_szShip3dDirectory) == NULL)
+        SDL_strlcpy(g_szShip3dDirectory, path, sizeof(g_szShip3dDirectory));
+#else
+    SDL_strlcpy(g_szShip3dDirectory, path, sizeof(g_szShip3dDirectory));
+#endif
+    g_bShip3dEnabled = 1;
+}
+
+int SdlShip3dEnabled(void)
+{
+    return g_bShip3dEnabled;
+}
+
+static unsigned char *ReadShip3dFile(const char *path, size_t *length)
+{
+    SDL_RWops *file;
+    Sint64 size;
+    unsigned char *data;
+
+    file = SDL_RWFromFile(path, "rb");
+    if (file == NULL)
+        return NULL;
+    size = SDL_RWsize(file);
+    if (size <= 0 || size > (Sint64)64 * 1024 * 1024) {
+        SDL_RWclose(file);
+        return NULL;
+    }
+    data = SDL_malloc((size_t)size + 1);
+    if (data == NULL || SDL_RWread(file, data, 1, (size_t)size) != (size_t)size) {
+        SDL_RWclose(file);
+        SDL_free(data);
+        return NULL;
+    }
+    SDL_RWclose(file);
+    data[size] = 0;
+    *length = (size_t)size;
+    return data;
+}
+
+static unsigned int ReadShip3dWord(const unsigned char *at)
+{
+    return (unsigned int)at[0] | (unsigned int)at[1] << 8 |
+           (unsigned int)at[2] << 16 | (unsigned int)at[3] << 24;
+}
+
+static float ReadShip3dFloat(const unsigned char *at)
+{
+    float value;
+
+    SDL_memcpy(&value, at, sizeof(value));
+    return value;
+}
+
+/* Fills the relighting fields from the .light sidecar. */
+static int LoadShip3dLight(Ship3dModel *model, const char *plyPath)
+{
+    char path[1200];
+    unsigned char *data;
+    size_t size;
+    size_t length;
+    size_t offset;
+    int bank;
+    int index;
+
+    length = SDL_strlen(plyPath);
+    if (length < 4 || length >= sizeof(path))
+        return 0;
+    SDL_memcpy(path, plyPath, length - 3);
+    SDL_strlcpy(path + length - 3, "light", sizeof(path) - (length - 3));
+    data = ReadShip3dFile(path, &size);
+    if (data == NULL) {
+        fprintf(stderr,
+                "ship3d: %s is missing; run bin/ship3dLight.py to make it\n",
+                path);
+        return 0;
+    }
+    offset = 4 + 4 + 4 + 4 + 4 * SHIP3D_BANK_COUNT +
+             (size_t)SHIP3D_BANK_COUNT * SHIP3D_LUT_SIZE;
+    if (size < offset || SDL_memcmp(data, "S3DL", 4) != 0 ||
+        ReadShip3dWord(data + 4) != 1 ||
+        ReadShip3dWord(data + 8) != (unsigned int)model->count ||
+        size != offset + (size_t)model->count * 6) {
+        fprintf(stderr, "ship3d: %s does not match its model\n", path);
+        SDL_free(data);
+        return 0;
+    }
+    model->reference = ReadShip3dFloat(data + 12);
+    for (bank = 0; bank < SHIP3D_BANK_COUNT; bank++)
+        model->slope[bank] = ReadShip3dFloat(data + 16 + 4 * bank);
+    offset = 16 + 4 * SHIP3D_BANK_COUNT;
+    SDL_memcpy(model->lut, data + offset, sizeof(model->lut));
+    offset += sizeof(model->lut);
+    for (index = 0; index < model->count; index++) {
+        Ship3dPoint *point = &model->points[index];
+
+        point->bank = (signed char)data[offset + index];
+        point->fixedIndex = data[offset + model->count + index];
+        point->albedo = ReadShip3dFloat(
+            data + offset + (size_t)model->count * 2 + (size_t)index * 4);
+        if (point->bank >= SHIP3D_BANK_COUNT)
+            point->bank = -1;
+    }
+    SDL_free(data);
+    return 1;
+}
+
+static void LoadShip3dModel(int type)
+{
+    Ship3dModel *model;
+    char path[1200];
+    unsigned char *data;
+    size_t size;
+    const char *header;
+    const char *body;
+    int count;
+    int index;
+
+    model = &g_aShip3dModels[type];
+    model->tried = 1;
+    /* Retail keeps capital ships in SHIP.Vnn and fighters (and the Spikeri)
+     * in SHIPTYPE.Vnn; the models follow the same split. */
+    SDL_snprintf(path, sizeof(path), "%s/SHIP_V%02d.ply",
+                 g_szShip3dDirectory, type);
+    data = ReadShip3dFile(path, &size);
+    if (data == NULL) {
+        SDL_snprintf(path, sizeof(path), "%s/SHIPTYPE_V%02d.ply",
+                     g_szShip3dDirectory, type);
+        data = ReadShip3dFile(path, &size);
+    }
+    if (data == NULL)
+        return;
+
+    header = (const char *)data;
+    body = SDL_strstr(header, "end_header\n");
+    if (body == NULL || SDL_strstr(header, "binary_little_endian") == NULL) {
+        SDL_free(data);
+        return;
+    }
+    body += 11;
+    count = 0;
+    {
+        const char *element = SDL_strstr(header, "element vertex ");
+
+        if (element != NULL)
+            count = SDL_atoi(element + 15);
+    }
+    if (count <= 0 ||
+        (Sint64)(body - header) + (Sint64)count * SHIP3D_PLY_STRIDE >
+            (Sint64)size) {
+        SDL_free(data);
+        return;
+    }
+    model->points = SDL_calloc((size_t)count, sizeof(Ship3dPoint));
+    if (model->points == NULL) {
+        SDL_free(data);
+        return;
+    }
+    for (index = 0; index < count; index++) {
+        const unsigned char *record =
+            (const unsigned char *)body + (size_t)index * SHIP3D_PLY_STRIDE;
+        Ship3dPoint *point = &model->points[index];
+
+        SDL_memcpy(&point->x, record, 24);
+    }
+    model->count = count;
+    SDL_free(data);
+    if (!LoadShip3dLight(model, path)) {
+        SDL_free(model->points);
+        model->points = NULL;
+        model->count = 0;
+        return;
+    }
+    fprintf(stderr, "ship3d: loaded %d points from %s\n", count, path);
+}
+
+static const Ship3dModel *GetShip3dModel(int type)
+{
+    Ship3dModel *model;
+
+    if (type < 0 || type >= SHIP3D_TYPE_COUNT)
+        return NULL;
+    model = &g_aShip3dModels[type];
+    if (!model->tried)
+        LoadShip3dModel(type);
+    return model->count > 0 ? model : NULL;
+}
+
+/* The pixels whose centres fall within half of centre; a footprint narrower
+ * than a pixel still lights the pixel that holds its centre. */
+static void GetShip3dSpan(float centre, float half, int *first, int *last)
+{
+    *first = (int)SDL_ceilf(centre - half - 0.5f);
+    *last = (int)SDL_floorf(centre + half - 0.5f);
+    if (*last < *first) {
+        *first = (int)SDL_floorf(centre);
+        *last = *first;
+    }
+}
+
+static float DotShip3d(const FixedVector *a, const FixedVector *b)
+{
+    return ((float)a->x * (float)b->x + (float)a->y * (float)b->y +
+            (float)a->z * (float)b->z) * (1.0f / 65536.0f);
+}
+
+int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
+{
+    const Ship3dModel *model;
+    RasterSurface surface;
+    RasterClip clip;
+    const FixedVector *objRight;
+    const FixedVector *objUp;
+    const FixedVector *objFwd;
+    float basis[3][3]; /* model axis -> camera coordinates */
+    float scale;
+    float lightX;
+    float lightY;
+    float lightZ;
+    float lightLength;
+    int viewLeft;
+    int viewTop;
+    int viewWidth;
+    int viewHeight;
+    float halfWidth;
+    float halfHeight;
+    int minX;
+    int minY;
+    int maxX;
+    int maxY;
+    int index;
+    int axis;
+
+    if (!g_bShip3dEnabled || viewport == NULL || viewport->pixels == NULL)
+        return 0;
+    if (aeObjectClass[obj] != OBJECT_CLASS_CAPITAL_SHIP &&
+        aeObjectClass[obj] != OBJECT_CLASS_SHIP)
+        return 0;
+    model = GetShip3dModel(aeObjectTypeList[obj]);
+    if (model == NULL)
+        return 0;
+    scale = (float)(unsigned short)asObjScreenScalesArray[obj] / 256.0f;
+    if (scale <= 0.0f)
+        return 1;
+
+    viewLeft = viewport->left;
+    viewTop = viewport->top;
+    viewWidth = viewport->right - viewport->left + 1;
+    viewHeight = viewport->bottom - viewport->top + 1;
+    if (viewWidth <= 0 || viewHeight <= 0 ||
+        viewWidth * viewHeight > SHIP3D_MAX_VIEWPORT_PIXELS)
+        return 1;
+    if (g_nShip3dDepthPixels < viewWidth * viewHeight) {
+        SDL_free(g_pfShip3dDepth);
+        g_pfShip3dDepth = SDL_malloc(
+            (size_t)viewWidth * viewHeight * sizeof(float));
+        g_nShip3dDepthPixels = g_pfShip3dDepth != NULL ?
+            viewWidth * viewHeight : 0;
+        if (g_pfShip3dDepth == NULL)
+            return 1;
+    }
+
+    objRight = &aShipRightVector[obj];
+    objUp = &aShipUpVector[obj];
+    objFwd = &aShipFwdVec[obj];
+    {
+        const FixedVector *eye[3];
+        const FixedVector *object[3];
+        float sign[3] = { 1.0f, -1.0f, -1.0f };
+
+        eye[0] = &aShipRightVector[EYE_OBJECT];
+        eye[1] = &aShipUpVector[EYE_OBJECT];
+        eye[2] = &aShipFwdVec[EYE_OBJECT];
+        object[0] = objRight;
+        object[1] = objUp;
+        object[2] = objFwd;
+        for (axis = 0; axis < 3; axis++) {
+            int camera;
+
+            for (camera = 0; camera < 3; camera++)
+                basis[camera][axis] =
+                    sign[axis] * DotShip3d(object[axis], eye[camera]);
+        }
+    }
+
+    /* Unit vector from the surface towards the light, in camera space
+     * (x right, y down, z forward): above, left of and behind the viewer.
+     * The relighting fit saw n.v between 0.3 and 1 with the light at the
+     * camera, and this light is at about 0.73 to the camera axis. */
+    lightX = -0.40f;
+    lightY = -0.55f;
+    lightZ = -0.73f;
+    lightLength = SDL_sqrtf(lightX * lightX + lightY * lightY +
+                            lightZ * lightZ);
+    lightX /= lightLength;
+    lightY /= lightLength;
+    lightZ /= lightLength;
+
+    ValidateViewportBounds(viewport, &surface, &clip);
+
+    /* Half the screen extent of one voxel cube under this orientation. */
+    halfWidth = 0.5f * SHIP3D_FOOTPRINT * scale *
+                (SDL_fabsf(basis[0][0]) + SDL_fabsf(basis[0][1]) +
+                 SDL_fabsf(basis[0][2]));
+    halfHeight = 0.5f * SHIP3D_FOOTPRINT * scale *
+                 (SDL_fabsf(basis[1][0]) + SDL_fabsf(basis[1][1]) +
+                  SDL_fabsf(basis[1][2]));
+
+    /* Screen bounding box of the splats, to clear the depth buffer. */
+    minX = viewWidth;
+    minY = viewHeight;
+    maxX = -1;
+    maxY = -1;
+    for (index = 0; index < model->count; index++) {
+        const Ship3dPoint *point = &model->points[index];
+        float cameraX = basis[0][0] * point->x + basis[0][1] * point->y +
+                        basis[0][2] * point->z;
+        float cameraY = basis[1][0] * point->x + basis[1][1] * point->y +
+                        basis[1][2] * point->z;
+        int firstX;
+        int lastX;
+        int firstY;
+        int lastY;
+
+        GetShip3dSpan(centerX + cameraX * scale - viewLeft, halfWidth,
+                      &firstX, &lastX);
+        GetShip3dSpan(centerY + cameraY * scale - viewTop, halfHeight,
+                      &firstY, &lastY);
+        if (firstX < minX)
+            minX = firstX;
+        if (firstY < minY)
+            minY = firstY;
+        if (lastX > maxX)
+            maxX = lastX;
+        if (lastY > maxY)
+            maxY = lastY;
+    }
+    if (minX < 0)
+        minX = 0;
+    if (minY < 0)
+        minY = 0;
+    if (maxX >= viewWidth)
+        maxX = viewWidth - 1;
+    if (maxY >= viewHeight)
+        maxY = viewHeight - 1;
+    if (maxX < minX || maxY < minY)
+        return 1;
+    {
+        int row;
+
+        for (row = minY; row <= maxY; row++) {
+            int column;
+            float *depth = g_pfShip3dDepth + row * viewWidth;
+
+            for (column = minX; column <= maxX; column++)
+                depth[column] = 3.0e38f;
+        }
+    }
+
+    for (index = 0; index < model->count; index++) {
+        const Ship3dPoint *point = &model->points[index];
+        float cameraX = basis[0][0] * point->x + basis[0][1] * point->y +
+                        basis[0][2] * point->z;
+        float cameraY = basis[1][0] * point->x + basis[1][1] * point->y +
+                        basis[1][2] * point->z;
+        float cameraZ = basis[2][0] * point->x + basis[2][1] * point->y +
+                        basis[2][2] * point->z;
+        float normalX = basis[0][0] * point->nx + basis[0][1] * point->ny +
+                        basis[0][2] * point->nz;
+        float normalY = basis[1][0] * point->nx + basis[1][1] * point->ny +
+                        basis[1][2] * point->nz;
+        float normalZ = basis[2][0] * point->nx + basis[2][1] * point->ny +
+                        basis[2][2] * point->nz;
+        float facing;
+        float brightness;
+        int step;
+        unsigned char colour;
+        int firstX;
+        int lastX;
+        int firstY;
+        int lastY;
+        int x;
+        int y;
+
+        /* Facing away from the viewer: let the front surface win. */
+        if (normalZ > 0.35f)
+            continue;
+        if (point->bank < 0) {
+            colour = point->fixedIndex;
+        } else {
+            facing = normalX * lightX + normalY * lightY + normalZ * lightZ;
+            if (facing < 0.0f)
+                facing = 0.0f;
+            else if (facing > 1.0f)
+                facing = 1.0f;
+            brightness = point->albedo +
+                         model->slope[point->bank] *
+                             (facing - model->reference);
+            step = (int)(brightness * 4.0f + 0.5f);
+            if (step < 0)
+                step = 0;
+            else if (step >= SHIP3D_LUT_SIZE)
+                step = SHIP3D_LUT_SIZE - 1;
+            colour = model->lut[point->bank][step];
+        }
+        GetShip3dSpan(centerX + cameraX * scale - viewLeft, halfWidth,
+                      &firstX, &lastX);
+        GetShip3dSpan(centerY + cameraY * scale - viewTop, halfHeight,
+                      &firstY, &lastY);
+        for (y = firstY < minY ? minY : firstY; y <= lastY && y <= maxY;
+             y++) {
+            float *depth = g_pfShip3dDepth + y * viewWidth;
+
+            for (x = firstX < minX ? minX : firstX;
+                 x <= lastX && x <= maxX; x++) {
+                if (cameraZ < depth[x]) {
+                    depth[x] = cameraZ;
+                    SetRasterClipPixel(&clip, x, y, colour);
+                }
+            }
+        }
+    }
+    return 1;
+}
+
+void SdlShip3dShutdown(void)
+{
+    int type;
+
+    for (type = 0; type < SHIP3D_TYPE_COUNT; type++) {
+        SDL_free(g_aShip3dModels[type].points);
+        SDL_zero(g_aShip3dModels[type]);
+    }
+    SDL_free(g_pfShip3dDepth);
+    g_pfShip3dDepth = NULL;
+    g_nShip3dDepthPixels = 0;
+}

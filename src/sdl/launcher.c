@@ -117,6 +117,10 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
         } else if (strcmp(argument, "--enhanced") == 0) {
             options->enhancedRenderer = 1;
             options->explicitOptions |= SDL_LAUNCHER_EXPLICIT_ENHANCED;
+        } else if (strcmp(argument, "--ship3d") == 0) {
+            SdlShip3dEnable(NULL);
+        } else if (strncmp(argument, "--ship3d=", 9) == 0) {
+            SdlShip3dEnable(argument + 9);
         } else if (strcmp(argument, "--cheats") == 0) {
             options->cheatMode = 1;
             options->explicitOptions |= SDL_LAUNCHER_EXPLICIT_CHEATS;

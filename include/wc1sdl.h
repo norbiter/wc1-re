@@ -265,6 +265,11 @@ int SdlRecordSpaceSprite(
     const struct Viewport *viewport, float x, float y,
     struct Shape *shape, short frame, short angle, short scale,
     short flip);
+void SdlShip3dEnable(const char *directory);
+int SdlShip3dEnabled(void);
+int SdlShip3dDraw(struct Viewport *viewport, short obj, float centerX,
+                  float centerY);
+void SdlShip3dShutdown(void);
 int SdlSetCursorPosition(int x, int y);
 BOOL SdlReadJoystick(unsigned int device, JOYINFO *information);
 BOOL SdlReadJoystickAxisRange(unsigned int device,

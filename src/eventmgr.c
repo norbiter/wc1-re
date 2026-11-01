@@ -1025,6 +1025,9 @@ void draw_sorted_objects_to_buffer(void)
                 asObjectDrawPosY[obj] = objectY;
                 if (objectShape != 0) {
 #ifdef SDL_PORT
+                    if (SdlShip3dDraw(&stSpaceBufferViewport, (short)obj,
+                                      enhancedScreenX, enhancedScreenY))
+                        break;
                     if (!SdlRecordSpaceSprite(
                             &stSpaceBufferViewport, enhancedScreenX, enhancedScreenY,
                             objectShape,

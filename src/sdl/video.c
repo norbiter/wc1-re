@@ -235,6 +235,10 @@ int SdlRecordSpaceSprite(
      * indices and cannot be sampled through the fixed 16-colour palette. */
     if (!SdlUsingGlRenderer() || g_bEgaDitherEnabled)
         return 0;
+    /* The point-cloud ships are composed into the indexed frame, so every
+     * sprite has to be too or the enhanced layer would draw over them. */
+    if (SdlShip3dEnabled())
+        return 0;
     return SdlGlRendererRecordSpaceSprite(
         viewport, x, y, shape, frame, angle, scale, flip);
 }
