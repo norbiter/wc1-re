@@ -26,7 +26,37 @@ The Ghidra-exported disassembly is in `code-full`. The reimplementation lives in
 
 ---
 
+## Scope: This Fork
+
+This is a personal fork of upstream (`neuromancer/wc1-re`). Its goals are to track
+upstream and to keep the SDL2 port building and playable, plus fork-only features and
+fixes. It does not pursue a byte-identical reconstruction.
+
+- **Never push to upstream.** `origin` is upstream and is fetch-only in practice. If
+  this fork is ever published, it goes to a separate fork remote.
+- **Track upstream by rebasing** local branches onto `origin/main`. Keep local
+  changes small and well isolated so rebases stay cheap.
+- **Verification is `make modern`** (or `make modern-gui`) building, and the game
+  running (`make run-modern`, `make run-modern-dos`). `make verify`, `make compare`,
+  `make report`, and `binary-comp` are upstream's reconstruction tooling and are not
+  required here.
+- **Where changes go:** prefer `src/sdl/` and `third_party/`. When shared game logic
+  must change, put the change in the `SDL_PORT` arm of an `#ifdef SDL_PORT` /
+  `#ifndef SDL_PORT` conditional, and leave the other arm as upstream has it.
+- The "Absolute Rules" and later sections below are upstream's rules for its
+  reconstruction work. They are kept verbatim to avoid rebase conflicts. Do not
+  apply them to fork work, but do not edit upstream-owned code against them either
+  (for example, do not add address comments or rename reconstructed functions
+  unless taking an upstream change).
+- Document player-visible fork features in the README's "Fixes and features" table
+  and in docs/SDL2.md.
+
+---
+
 ## Absolute Rules (Do Not Violate)
+
+Upstream's rules for its reconstruction work; see "Scope: This Fork" above for how
+they apply here.
 
 - Existing functions may be modified or removed when justified by the original
   assembly. Preserve address annotations for reconstructed functions and validate

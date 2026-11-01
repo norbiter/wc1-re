@@ -10,6 +10,20 @@ Super Wing Commander Mac demo.
 
 No original game data or Sega CD voice recordings are included.
 
+## About this fork
+
+This is a personal fork that tracks upstream
+([neuromancer/wc1-re](https://github.com/neuromancer/wc1-re)) and keeps the
+SDL2 port building and playable, with some fork-only features and fixes on top.
+It does not pursue a byte-identical reconstruction itself: the upstream
+reconstruction tooling (`make report`, `make compare`, `make verify`) is
+inherited but not part of this fork's workflow. Nothing here is pushed back to
+upstream; if it is published, it goes to a separate fork.
+
+To keep rebasing onto upstream cheap, fork changes stay small and live in
+`src/sdl/` or in the `SDL_PORT` arm of conditionals in shared source. See
+[AGENTS.md](AGENTS.md) for the working rules.
+
 If you find this project useful, you can [support its development through
 GitHub Sponsors](https://github.com/sponsors/neuromancer).
 
