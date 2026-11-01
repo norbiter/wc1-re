@@ -80,6 +80,119 @@ static void UpdateHitSphereTables(void)
     }
 }
 
+/* The volume a laser bolt's centre cannot enter without hitting: the hull
+ * inflated by the bolt's radius.  Each pixel's ray runs along the camera's
+ * z axis through the hull's signed distance field and stops where the field
+ * drops below the bolt radius.  Returns 0 when the ship has no hull field. */
+static int DrawHullVolume(Viewport *viewport, short obj, float centerX,
+                          float centerY)
+{
+    const HullField *field;
+    float basis[3][3];
+    RasterSurface surface;
+    RasterClip clip;
+    float unitsPerModel; /* world units per model unit */
+    float depth;
+    float pixelsPerModel;
+    float boltRadius;    /* model units */
+    float bound;         /* model units, bounding radius incl. bolt */
+    float cell;
+    float extent;
+    int viewLeft = viewport->left;
+    int viewTop = viewport->top;
+    int viewWidth = viewport->right - viewport->left + 1;
+    int viewHeight = viewport->bottom - viewport->top + 1;
+    int firstX;
+    int lastX;
+    int firstY;
+    int lastY;
+    int row;
+    int column;
+
+    field = SdlGetHullField(aeObjectTypeList[obj]);
+    if (field == NULL)
+        return 0;
+    depth = (float)aObjectViewPositionsList[obj].z / 256.0f;
+    if (depth <= 0.0f)
+        return 1;
+    /* The engine sizes a sprite as scale/256 pixels per model unit when it
+     * is far away, so a model unit is scale/256 world units. */
+    unitsPerModel = (float)(unsigned short)awObjectScales[obj] / 256.0f;
+    if (unitsPerModel <= 0.0f)
+        return 1;
+    pixelsPerModel = (float)(nScreenWidth & ~1) * 0.5f * unitsPerModel / depth;
+    boltRadius = (float)aObjectTypeData[OBJECT_TYPE_LASER_CANNON]
+                     .collisionRadius / unitsPerModel;
+    cell = SdlGetHullFieldCell(field);
+    bound = SdlGetHullFieldRadius(field) + boltRadius;
+    extent = bound * pixelsPerModel;
+    firstX = (int)SDL_floorf(centerX - extent) - viewLeft;
+    lastX = (int)SDL_ceilf(centerX + extent) - viewLeft;
+    firstY = (int)SDL_floorf(centerY - extent) - viewTop;
+    lastY = (int)SDL_ceilf(centerY + extent) - viewTop;
+    if (firstX < 0)
+        firstX = 0;
+    if (firstY < 0)
+        firstY = 0;
+    if (lastX >= viewWidth)
+        lastX = viewWidth - 1;
+    if (lastY >= viewHeight)
+        lastY = viewHeight - 1;
+    if (lastX < firstX || lastY < firstY)
+        return 1;
+
+    SdlShip3dComputeBasis(obj, basis);
+    UpdateHitSphereTables();
+    ValidateViewportBounds(viewport, &surface, &clip);
+    for (row = firstY; row <= lastY; row++) {
+        float cameraY = ((float)(row + viewTop) + 0.5f - centerY) /
+                        pixelsPerModel;
+
+        for (column = firstX; column <= lastX; column++) {
+            float cameraX = ((float)(column + viewLeft) + 0.5f - centerX) /
+                            pixelsPerModel;
+            float start[3];
+            float direction[3];
+            float travel = 0.0f;
+            int axis;
+            int iteration;
+            int hit = 0;
+
+            if (cameraX * cameraX + cameraY * cameraY > bound * bound)
+                continue;
+            /* Camera -> model is the transpose of the model -> camera
+             * rotation; the ray starts at the near side of the bound. */
+            for (axis = 0; axis < 3; axis++) {
+                start[axis] = basis[0][axis] * cameraX +
+                              basis[1][axis] * cameraY -
+                              basis[2][axis] * bound;
+                direction[axis] = basis[2][axis];
+            }
+            for (iteration = 0; iteration < 160 && travel < 2.0f * bound;
+                 iteration++) {
+                float d = SdlSampleHullField(
+                    field, start[0] + direction[0] * travel,
+                    start[1] + direction[1] * travel,
+                    start[2] + direction[2] * travel);
+
+                if (d <= boltRadius) {
+                    hit = 1;
+                    break;
+                }
+                travel += d - boltRadius > 0.25f * cell
+                              ? d - boltRadius : 0.25f * cell;
+            }
+            if (hit) {
+                int current = ReadRasterClipPixel(&clip, column, row) & 0xff;
+
+                SetRasterClipPixel(&clip, column, row,
+                                   g_abHitSphereFill[current]);
+            }
+        }
+    }
+    return 1;
+}
+
 void SdlHitSphereDraw(Viewport *viewport, short obj, float centerX,
                       float centerY)
 {
@@ -107,6 +220,8 @@ void SdlHitSphereDraw(Viewport *viewport, short obj, float centerX,
         return;
     if (aeObjectClass[obj] != OBJECT_CLASS_CAPITAL_SHIP &&
         aeObjectClass[obj] != OBJECT_CLASS_SHIP)
+        return;
+    if (DrawHullVolume(viewport, obj, centerX, centerY))
         return;
     /* The same sphere the collision and weapon tests use, in 1/256 units. */
     radius = (float)asObjectCollisionRadius[obj] * 256.0f;

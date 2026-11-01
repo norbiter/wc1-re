@@ -573,6 +573,7 @@ MODERN_GAME_HOST_SRCS = \
 	src/sdl/music.c \
 	src/sdl/ship3d.c \
 	src/sdl/hitsphere.c \
+	src/sdl/hullfield.c \
 	src/sdl/video.c
 MODERN_GAME_HOST_CXX_SRCS = \
 	src/sdl/originfx.cpp \

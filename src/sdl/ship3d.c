@@ -284,14 +284,54 @@ static float DotShip3d(const FixedVector *a, const FixedVector *b)
             (float)a->z * (float)b->z) * (1.0f / 65536.0f);
 }
 
+/* The model-to-camera rotation for obj: basis[camera][modelAxis]. */
+void SdlShip3dComputeBasis(short obj, float basis[3][3])
+{
+    const FixedVector *eye[3];
+    const FixedVector *object[3];
+    float sign[3] = { 1.0f, -1.0f, -1.0f };
+    int axis;
+
+    eye[0] = &aShipRightVector[EYE_OBJECT];
+    eye[1] = &aShipUpVector[EYE_OBJECT];
+    eye[2] = &aShipFwdVec[EYE_OBJECT];
+    object[0] = &aShipRightVector[obj];
+    object[1] = &aShipUpVector[obj];
+    object[2] = &aShipFwdVec[obj];
+    for (axis = 0; axis < 3; axis++) {
+        int camera;
+
+        for (camera = 0; camera < 3; camera++)
+            basis[camera][axis] =
+                sign[axis] * DotShip3d(object[axis], eye[camera]);
+    }
+}
+
+int SdlShip3dGetPoints(int type, const float **xyz, int *stride, int *count)
+{
+    const Ship3dModel *model;
+
+    if (g_szShip3dDirectory[0] == '\0') {
+#ifndef _WIN32
+        if (realpath("ship3d", g_szShip3dDirectory) == NULL)
+#endif
+            SDL_strlcpy(g_szShip3dDirectory, "ship3d",
+                        sizeof(g_szShip3dDirectory));
+    }
+    model = GetShip3dModel(type);
+    if (model == NULL)
+        return 0;
+    *xyz = &model->points[0].x;
+    *stride = (int)(sizeof(Ship3dPoint) / sizeof(float));
+    *count = model->count;
+    return 1;
+}
+
 int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
 {
     const Ship3dModel *model;
     RasterSurface surface;
     RasterClip clip;
-    const FixedVector *objRight;
-    const FixedVector *objUp;
-    const FixedVector *objFwd;
     float basis[3][3]; /* model axis -> camera coordinates */
     float scale;
     float lightX;
@@ -309,7 +349,6 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
     int maxX;
     int maxY;
     int index;
-    int axis;
 
     if (!g_bShip3dEnabled || viewport == NULL || viewport->pixels == NULL)
         return 0;
@@ -340,28 +379,7 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
             return 1;
     }
 
-    objRight = &aShipRightVector[obj];
-    objUp = &aShipUpVector[obj];
-    objFwd = &aShipFwdVec[obj];
-    {
-        const FixedVector *eye[3];
-        const FixedVector *object[3];
-        float sign[3] = { 1.0f, -1.0f, -1.0f };
-
-        eye[0] = &aShipRightVector[EYE_OBJECT];
-        eye[1] = &aShipUpVector[EYE_OBJECT];
-        eye[2] = &aShipFwdVec[EYE_OBJECT];
-        object[0] = objRight;
-        object[1] = objUp;
-        object[2] = objFwd;
-        for (axis = 0; axis < 3; axis++) {
-            int camera;
-
-            for (camera = 0; camera < 3; camera++)
-                basis[camera][axis] =
-                    sign[axis] * DotShip3d(object[axis], eye[camera]);
-        }
-    }
+    SdlShip3dComputeBasis(obj, basis);
 
     /* Unit vector from the surface towards the light, in camera space
      * (x right, y down, z forward): above, left of and behind the viewer.

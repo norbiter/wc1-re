@@ -270,6 +270,14 @@ int SdlShip3dEnabled(void);
 int SdlShip3dDraw(struct Viewport *viewport, short obj, float centerX,
                   float centerY);
 void SdlShip3dShutdown(void);
+void SdlShip3dComputeBasis(short obj, float basis[3][3]);
+int SdlShip3dGetPoints(int type, const float **xyz, int *stride, int *count);
+typedef struct HullField HullField;
+const HullField *SdlGetHullField(int type);
+float SdlSampleHullField(const HullField *field, float x, float y,
+                         float z);
+float SdlGetHullFieldCell(const HullField *field);
+float SdlGetHullFieldRadius(const HullField *field);
 const unsigned char *SdlGetPaletteQuads(void);
 void SdlHitSphereEnable(void);
 int SdlHitSphereEnabled(void);
