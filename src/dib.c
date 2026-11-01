@@ -926,6 +926,13 @@ void DIBramPalette(void)
 #endif
 }
 
+#ifdef SDL_PORT
+const unsigned char *SdlGetPaletteQuads(void)
+{
+    return abDIBPaletteQuads;
+}
+#endif
+
 /* Function start: 0x432F10 */
 void DIBsetPalette(short index, short *rgb)
 {

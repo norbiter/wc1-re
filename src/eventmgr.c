@@ -1026,8 +1026,11 @@ void draw_sorted_objects_to_buffer(void)
                 if (objectShape != 0) {
 #ifdef SDL_PORT
                     if (SdlShip3dDraw(&stSpaceBufferViewport, (short)obj,
-                                      enhancedScreenX, enhancedScreenY))
+                                      enhancedScreenX, enhancedScreenY)) {
+                        SdlHitSphereDraw(&stSpaceBufferViewport, (short)obj,
+                                         enhancedScreenX, enhancedScreenY);
                         break;
+                    }
                     if (!SdlRecordSpaceSprite(
                             &stSpaceBufferViewport, enhancedScreenX, enhancedScreenY,
                             objectShape,
@@ -1042,6 +1045,10 @@ void draw_sorted_objects_to_buffer(void)
                         asObjScreenAngles[obj],
                         asObjScreenScalesArray[obj],
                         asObjectFlipArray[obj]);
+#ifdef SDL_PORT
+                    SdlHitSphereDraw(&stSpaceBufferViewport, (short)obj,
+                                     enhancedScreenX, enhancedScreenY);
+#endif
                 }
                 break;
             }

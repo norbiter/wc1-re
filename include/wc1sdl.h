@@ -270,6 +270,11 @@ int SdlShip3dEnabled(void);
 int SdlShip3dDraw(struct Viewport *viewport, short obj, float centerX,
                   float centerY);
 void SdlShip3dShutdown(void);
+const unsigned char *SdlGetPaletteQuads(void);
+void SdlHitSphereEnable(void);
+int SdlHitSphereEnabled(void);
+void SdlHitSphereDraw(struct Viewport *viewport, short obj, float centerX,
+                      float centerY);
 int SdlSetCursorPosition(int x, int y);
 BOOL SdlReadJoystick(unsigned int device, JOYINFO *information);
 BOOL SdlReadJoystickAxisRange(unsigned int device,
