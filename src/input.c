@@ -73,6 +73,48 @@ void JoystickInputHook(void)
 }
 
 /* Function start: 0x430840 */
+#ifdef SDL_PORT
+void PollJoystickButtonEvents(void)
+{
+    short doubleClick;
+    short device;
+
+    if (nCurrentActiveInputDevice == -1)
+        return;
+    if (bInputPollingGuard != 0)
+        return;
+    bInputPollingGuard++;
+    UpdateInputDeviceTransitions(1);
+    /* A failed sample resets the active device to -1, and queueing an event
+     * can re-enter the poll; the original then indexed the tables at [-1].
+     * Latch the device once and use it throughout. */
+    device = nCurrentActiveInputDevice;
+    if (device == -1) {
+        bInputPollingGuard--;
+        return;
+    }
+    if (asInputBtn1ChangedTable[device] != 0) {
+        doubleClick = 0;
+        if (asInputButton1DoubleClicksList[device] != 0)
+            doubleClick = 3;
+        QueueInputEventAtCursor(
+            (aInputDevSamples[device].buttons & 1) + 1,
+            0, doubleClick);
+    }
+    if (asInputButton2ChangedTable[device] != 0) {
+        doubleClick = 0;
+        if (asInputButton2DoubleClick[device] != 0)
+            doubleClick = 3;
+        QueueInputEventAtCursor(
+            ((aInputDevSamples[device].buttons >> 1) & 1) + 1,
+            1, doubleClick);
+    }
+    stHostMouseState.secondaryButton =
+        (unsigned char)aInputDevSamples[device].buttons;
+    stHostMouseState.primaryButton = stHostMouseState.secondaryButton;
+    bInputPollingGuard--;
+}
+#else
 void PollJoystickButtonEvents(void)
 {
     short doubleClick;
@@ -113,8 +155,111 @@ void PollJoystickButtonEvents(void)
     stHostMouseState.primaryButton = stHostMouseState.secondaryButton;
     bInputPollingGuard--;
 }
+#endif
 
 /* Function start: 0x430920 */
+#ifdef SDL_PORT
+void PollMenuInputDevices(void)
+{
+    signed char doubleClick;
+    unsigned char changes;
+    short device;
+
+    changes = 0;
+    if (nCurrentActiveInputDevice == -1)
+        return;
+    stHostMouseState.x = stMouseCursorState.x;
+    stHostMouseState.y = stMouseCursorState.y;
+    if (bInputPollingGuard == 0) {
+        bInputPollingGuard++;
+        UpdateInputDeviceTransitions(0);
+        /* A failed sample resets the active device to -1, and queueing an
+         * event can re-enter the poll; latch the device once. */
+        device = nCurrentActiveInputDevice;
+        if (device == -1) {
+            bInputPollingGuard--;
+            return;
+        }
+
+        if (asInputBtn1ChangedTable[device] != 0) {
+            stHostMouseState.x +=
+                aInputDevSamples[device].x *
+                nMenuPointerSpeed;
+            stHostMouseState.y +=
+                aInputDevSamples[device].y *
+                nMenuPointerSpeed;
+            doubleClick = 0;
+            if (asInputButton1DoubleClicksList[device] != 0)
+                doubleClick = 3;
+            QueueInputEventAtCursor(
+                (aInputDevSamples[device].buttons & 1) + 1,
+                0, (short)doubleClick);
+            changes++;
+        }
+        if (asInputButton2ChangedTable[device] != 0) {
+            stHostMouseState.x +=
+                aInputDevSamples[device].x *
+                nMenuPointerSpeed;
+            stHostMouseState.y +=
+                aInputDevSamples[device].y *
+                nMenuPointerSpeed;
+            doubleClick = 0;
+            if (asInputButton1DoubleClicksList[device] != 0)
+                doubleClick = 3;
+            QueueInputEventAtCursor(
+                ((aInputDevSamples[device].buttons >> 1) &
+                 1) + 1,
+                1, (short)doubleClick);
+            changes++;
+        }
+        if (changes == 0) {
+            stHostMouseState.x +=
+                aInputDevSamples[device].x *
+                nMenuPointerSpeed;
+            stHostMouseState.y +=
+                aInputDevSamples[device].y *
+                nMenuPointerSpeed;
+            changes = (unsigned char)(
+                aInputDevSamples[device].y |
+                aInputDevSamples[device].x);
+            if (changes != 0) {
+                FlushInputEvents();
+                stHostMouseState.x = stHostMouseState.x > 0 ?
+                    stHostMouseState.x : 0;
+                stHostMouseState.x = stHostMouseState.x < 319 ?
+                    stHostMouseState.x : 319;
+                stHostMouseState.y = stHostMouseState.y > 0 ?
+                    stHostMouseState.y : 0;
+                stHostMouseState.y = stHostMouseState.y < 199 ?
+                    stHostMouseState.y : 199;
+                SetMousePosition(stHostMouseState.x, stHostMouseState.y);
+            }
+        }
+
+        stHostMouseState.secondaryButton =
+            (unsigned char)aInputDevSamples[device].buttons;
+        stHostMouseState.primaryButton = stHostMouseState.secondaryButton;
+        stHostMouseState.x = stHostMouseState.x > 0 ?
+            stHostMouseState.x : 0;
+        stHostMouseState.x = stHostMouseState.x < 319 ?
+            stHostMouseState.x : 319;
+        stHostMouseState.y = stHostMouseState.y > 0 ?
+            stHostMouseState.y : 0;
+        stHostMouseState.y = stHostMouseState.y < 199 ?
+            stHostMouseState.y : 199;
+        if (changes != 0) {
+            LeaveAllocationScope();
+            stMouseCursorState.x = stHostMouseState.x;
+            stMouseCursorState.y = stHostMouseState.y;
+            stMouseCursorState.primaryButton = stHostMouseState.primaryButton;
+            stMouseCursorState.secondaryButton = stHostMouseState.secondaryButton;
+            stMouseCursorState.flags = stHostMouseState.flags;
+            EnterAllocationScope();
+        }
+        bInputPollingGuard--;
+    }
+}
+#else
 void PollMenuInputDevices(void)
 {
     signed char doubleClick;
@@ -128,7 +273,6 @@ void PollMenuInputDevices(void)
     if (bInputPollingGuard == 0) {
         bInputPollingGuard++;
         UpdateInputDeviceTransitions(0);
-
         if (asInputBtn1ChangedTable[nCurrentActiveInputDevice] != 0) {
             stHostMouseState.x +=
                 aInputDevSamples[nCurrentActiveInputDevice].x *
@@ -208,3 +352,4 @@ void PollMenuInputDevices(void)
         bInputPollingGuard--;
     }
 }
+#endif

@@ -53,6 +53,10 @@ void TranslatePolledInputEvent(unsigned short type, unsigned int value)
         return;
     case INPUT_EVENT_JOYSTICK_MOVE:
         samples = aInputDevSamples;
+#ifdef SDL_PORT
+        if (nCurrentActiveInputDevice == -1)
+            return;
+#endif
         QueueInputEvent(type, samples[nCurrentActiveInputDevice].x,
                         samples[nCurrentActiveInputDevice].y, 0, 0, 0, 0);
         return;

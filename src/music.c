@@ -786,7 +786,8 @@ void PlaySfxWaveFileByNumber(int soundNumber, int sourceObject, int looping)
         }
         if (volume >= 10 && SdlPlayDosSoundEffect(
                 soundNumber, volume, 64, sourceObject, looping)) {
-            aiSoundEffectSourceActiveArray[sourceObject] = 1;
+            if (sourceObject != -1)
+                aiSoundEffectSourceActiveArray[sourceObject] = 1;
             if (sourceObject == -1)
                 bAfterburnerSfxEnabled = soundNumber == 12;
         }
@@ -808,7 +809,13 @@ void PlaySfxWaveFileByNumber(int soundNumber, int sourceObject, int looping)
         distance = 32000;
     }
     if (distance >= 10) {
+#ifdef SDL_PORT
+        /* Global sounds pass -1; the original wrote just before the array. */
+        if (sourceObject != -1)
+            aiSoundEffectSourceActiveArray[sourceObject] = 1;
+#else
         aiSoundEffectSourceActiveArray[sourceObject] = 1;
+#endif
         sprintf(szSfxWavePath, "sfx%02i.wav",
                 soundNumber - 1);
         playWAVE(szSfxWavePath, looping, distance);

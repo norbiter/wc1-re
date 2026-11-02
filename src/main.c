@@ -1128,8 +1128,14 @@ unsigned int player_input(void)
                         -stLastPolledFlightInput.y;
                 }
             }
+#ifdef SDL_PORT
+            if (nCurrentActiveInputDevice != -1 &&
+                asInputButton2DoubleClick[
+                    nCurrentActiveInputDevice] != 0)
+#else
             if (asInputButton2DoubleClick[
                     nCurrentActiveInputDevice] != 0)
+#endif
                 bCurrentKey = SCAN_TAB;
             if (cPreviousKey == SCAN_TAB &&
                 (stLastPolledFlightInput.buttons & JOY_BUTTON2) != 0)
