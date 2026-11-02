@@ -65,6 +65,9 @@ typedef struct Ship3dModel {
     float reference;            /* c: n.v at which a point shows its albedo */
     float slope[SHIP3D_BANK_COUNT]; /* b: brightness per unit n.v, per bank */
     unsigned char lut[SHIP3D_BANK_COUNT][SHIP3D_LUT_SIZE];
+    /* lut smoothed for the GL layer: palette index below, the next ramp
+     * entry above, and how far (0..255) the brightness is between them. */
+    unsigned char ramp[SHIP3D_BANK_COUNT][SHIP3D_LUT_SIZE][3];
 } Ship3dModel;
 
 static char g_szShip3dDirectory[1024];
@@ -72,6 +75,8 @@ static int g_bShip3dEnabled;
 static Ship3dModel g_aShip3dModels[SHIP3D_TYPE_COUNT];
 static float *g_pfShip3dDepth;
 static int g_nShip3dDepthPixels;
+static float *g_pfShip3dGlPoints;
+static int g_nShip3dGlPointCapacity;
 
 void SdlShip3dEnable(const char *directory)
 {
@@ -90,6 +95,15 @@ void SdlShip3dEnable(const char *directory)
 int SdlShip3dEnabled(void)
 {
     return g_bShip3dEnabled;
+}
+
+/* With the GL renderer the ships are drawn at output resolution in the
+ * object layer.  The hit-sphere overlay and the EGA filter work on the
+ * indexed frame, so they keep the ships there. */
+int SdlShip3dUsesGl(void)
+{
+    return g_bShip3dEnabled && SdlUsingGlRenderer() &&
+           !SdlHitSphereEnabled() && !SdlEgaDitherEnabled();
 }
 
 static unsigned char *ReadShip3dFile(const char *path, size_t *length)
@@ -132,6 +146,69 @@ static float ReadShip3dFloat(const unsigned char *at)
     return value;
 }
 
+/* The lut picks the nearest palette entry, so it is a staircase.  Each run
+ * of equal entries stands for one ramp colour at the run's centre; between
+ * two centres the GL layer blends the two palette entries.  The end runs
+ * reach to the ends of the table, so their centres are pulled in to a
+ * neighbour's width from the boundary. */
+static void BuildShip3dRamp(Ship3dModel *model)
+{
+    int bank;
+
+    for (bank = 0; bank < SHIP3D_BANK_COUNT; bank++) {
+        const unsigned char *lut = model->lut[bank];
+        float centre[SHIP3D_LUT_SIZE];
+        float width[SHIP3D_LUT_SIZE];
+        unsigned char entry[SHIP3D_LUT_SIZE];
+        int runs = 0;
+        int start = 0;
+        int step;
+        int run;
+
+        while (start < SHIP3D_LUT_SIZE) {
+            int end = start;
+
+            while (end + 1 < SHIP3D_LUT_SIZE && lut[end + 1] == lut[start])
+                end++;
+            entry[runs] = lut[start];
+            centre[runs] = (float)(start + end) * 0.5f;
+            width[runs] = (float)(end - start + 1);
+            runs++;
+            start = end + 1;
+        }
+        if (runs >= 2) {
+            float boundary = centre[0] + width[0] * 0.5f;
+            float pulled = boundary - width[1] * 0.5f;
+
+            if (pulled > centre[0])
+                centre[0] = pulled;
+            boundary = centre[runs - 1] - width[runs - 1] * 0.5f;
+            pulled = boundary + width[runs - 2] * 0.5f;
+            if (pulled < centre[runs - 1])
+                centre[runs - 1] = pulled;
+            for (run = 1; run < runs; run++)
+                if (centre[run] <= centre[run - 1])
+                    centre[run] = centre[run - 1] + 0.01f;
+        }
+        run = 0;
+        for (step = 0; step < SHIP3D_LUT_SIZE; step++) {
+            unsigned char *out = model->ramp[bank][step];
+            float fraction = 0.0f;
+            int next;
+
+            while (run + 1 < runs && (float)step >= centre[run + 1])
+                run++;
+            next = run + 1 < runs ? run + 1 : run;
+            if (next != run && (float)step > centre[run])
+                fraction = ((float)step - centre[run]) /
+                           (centre[next] - centre[run]);
+            out[0] = entry[run];
+            out[1] = entry[next];
+            out[2] = (unsigned char)(fraction * 255.0f + 0.5f);
+        }
+    }
+}
+
 /* Fills the relighting fields from the .light sidecar. */
 static int LoadShip3dLight(Ship3dModel *model, const char *plyPath)
 {
@@ -171,6 +248,7 @@ static int LoadShip3dLight(Ship3dModel *model, const char *plyPath)
     offset = 16 + 4 * SHIP3D_BANK_COUNT;
     SDL_memcpy(model->lut, data + offset, sizeof(model->lut));
     offset += sizeof(model->lut);
+    BuildShip3dRamp(model);
     for (index = 0; index < model->count; index++) {
         Ship3dPoint *point = &model->points[index];
 
@@ -404,6 +482,87 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
                  (SDL_fabsf(basis[1][0]) + SDL_fabsf(basis[1][1]) +
                   SDL_fabsf(basis[1][2]));
 
+    if (SdlShip3dUsesGl()) {
+        int recorded = 0;
+        int pointCount = 0;
+
+        if (g_nShip3dGlPointCapacity < model->count) {
+            SDL_free(g_pfShip3dGlPoints);
+            g_pfShip3dGlPoints = SDL_malloc((size_t)model->count * 6 *
+                                            sizeof(float));
+            g_nShip3dGlPointCapacity = g_pfShip3dGlPoints != NULL ?
+                model->count : 0;
+        }
+        if (g_pfShip3dGlPoints != NULL) {
+            for (index = 0; index < model->count; index++) {
+                const Ship3dPoint *point = &model->points[index];
+                float cameraX = basis[0][0] * point->x +
+                                basis[0][1] * point->y +
+                                basis[0][2] * point->z;
+                float cameraY = basis[1][0] * point->x +
+                                basis[1][1] * point->y +
+                                basis[1][2] * point->z;
+                float cameraZ = basis[2][0] * point->x +
+                                basis[2][1] * point->y +
+                                basis[2][2] * point->z;
+                float normalX = basis[0][0] * point->nx +
+                                basis[0][1] * point->ny +
+                                basis[0][2] * point->nz;
+                float normalY = basis[1][0] * point->nx +
+                                basis[1][1] * point->ny +
+                                basis[1][2] * point->nz;
+                float normalZ = basis[2][0] * point->nx +
+                                basis[2][1] * point->ny +
+                                basis[2][2] * point->nz;
+                float *out;
+                float depth;
+
+                if (normalZ > 0.35f)
+                    continue;
+                out = g_pfShip3dGlPoints + (size_t)pointCount * 6;
+                out[0] = centerX + cameraX * scale - 0.5f;
+                out[1] = centerY + cameraY * scale - 0.5f;
+                depth = cameraZ * scale * (1.0f / 8192.0f);
+                out[2] = depth < -0.99f ? -0.99f :
+                         depth > 0.99f ? 0.99f : depth;
+                if (point->bank < 0) {
+                    out[3] = (float)point->fixedIndex;
+                    out[4] = (float)point->fixedIndex;
+                    out[5] = 0.0f;
+                } else {
+                    float facing = normalX * lightX + normalY * lightY +
+                                   normalZ * lightZ;
+                    float brightness;
+                    int step;
+                    const unsigned char *ramp;
+
+                    if (facing < 0.0f)
+                        facing = 0.0f;
+                    else if (facing > 1.0f)
+                        facing = 1.0f;
+                    brightness = point->albedo +
+                                 model->slope[point->bank] *
+                                     (facing - model->reference);
+                    step = (int)(brightness * 4.0f + 0.5f);
+                    if (step < 0)
+                        step = 0;
+                    else if (step >= SHIP3D_LUT_SIZE)
+                        step = SHIP3D_LUT_SIZE - 1;
+                    ramp = model->ramp[point->bank][step];
+                    out[3] = (float)ramp[0];
+                    out[4] = (float)ramp[1];
+                    out[5] = (float)ramp[2] * (1.0f / 255.0f);
+                }
+                pointCount++;
+            }
+            recorded = SdlGlRendererRecordShip(
+                viewport, g_pfShip3dGlPoints, pointCount,
+                halfWidth > halfHeight ? halfWidth : halfHeight);
+        }
+        if (recorded)
+            return 1;
+    }
+
     /* Screen bounding box of the splats, to clear the depth buffer. */
     minX = viewWidth;
     minY = viewHeight;
@@ -532,4 +691,7 @@ void SdlShip3dShutdown(void)
     SDL_free(g_pfShip3dDepth);
     g_pfShip3dDepth = NULL;
     g_nShip3dDepthPixels = 0;
+    SDL_free(g_pfShip3dGlPoints);
+    g_pfShip3dGlPoints = NULL;
+    g_nShip3dGlPointCapacity = 0;
 }

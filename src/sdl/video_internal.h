@@ -16,6 +16,11 @@ typedef enum SdlVideoBackend {
 void SdlSetVideoBackend(SdlVideoBackend backend);
 int SdlUsingGlRenderer(void);
 void SdlEnableEgaDither(void);
+int SdlEgaDitherEnabled(void);
+int SdlShip3dUsesGl(void);
+int SdlGlRendererRecordShip(const struct Viewport *viewport,
+                               const float *points, int count,
+                               float footprintHalfExtent);
 int SdlConfigureVideoWindow(Uint32 *windowFlags);
 void SdlCalculateOutputViewport(int width, int height, int *left,
                                    int *bottom, int *viewportWidth,

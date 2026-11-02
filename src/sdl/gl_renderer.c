@@ -9,6 +9,10 @@
 
 #include <stddef.h>
 
+#ifndef GL_PROGRAM_POINT_SIZE
+#define GL_PROGRAM_POINT_SIZE 0x8642
+#endif
+
 /* The enhanced backend keeps the game framebuffer indexed at 320x200 and
    renders only recorded space objects at output resolution.  All OpenGL
    resources and frame-lifetime state are private to this unit. */
@@ -38,6 +42,7 @@ typedef void (APIENTRY *GlDeleteTexturesProc)(GLsizei count,
                                                 const GLuint *textures);
 typedef void (APIENTRY *GlDeleteVertexArraysProc)(GLsizei count,
                                                     const GLuint *arrays);
+typedef void (APIENTRY *GlDepthFuncProc)(GLenum function);
 typedef void (APIENTRY *GlDisableProc)(GLenum capability);
 typedef void (APIENTRY *GlDrawArraysProc)(GLenum mode, GLint first,
                                             GLsizei count);
@@ -85,6 +90,9 @@ typedef void (APIENTRY *GlTexSubImage3DProc)(
     GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type,
     const void *pixels);
 typedef void (APIENTRY *GlUniform1iProc)(GLint location, GLint value);
+typedef void (APIENTRY *GlUniform1fProc)(GLint location, GLfloat value);
+typedef void (APIENTRY *GlUniform4fProc)(GLint location, GLfloat x, GLfloat y,
+                                         GLfloat z, GLfloat w);
 typedef void (APIENTRY *GlUseProgramProc)(GLuint program);
 typedef void (APIENTRY *GlVertexAttribPointerProc)(GLuint index, GLint size,
                                                      GLenum type,
@@ -113,6 +121,7 @@ typedef struct GlFunctions {
     GlDeleteShaderProc DeleteShader;
     GlDeleteTexturesProc DeleteTextures;
     GlDeleteVertexArraysProc DeleteVertexArrays;
+    GlDepthFuncProc DepthFunc;
     GlDisableProc Disable;
     GlDrawArraysProc DrawArrays;
     GlEnableProc Enable;
@@ -134,6 +143,8 @@ typedef struct GlFunctions {
     GlTexParameteriProc TexParameteri;
     GlTexSubImage3DProc TexSubImage3D;
     GlUniform1iProc Uniform1i;
+    GlUniform1fProc Uniform1f;
+    GlUniform4fProc Uniform4f;
     GlUseProgramProc UseProgram;
     GlVertexAttribPointerProc VertexAttribPointer;
     GlViewportProc Viewport;
@@ -181,7 +192,21 @@ typedef struct GlSprite {
     short clipTop;
     short clipRight;
     short clipBottom;
+    /* A ship entry has no cached frame: it owns a run of the ship point
+       pool that is drawn as depth-tested points. */
+    unsigned int shipFirst;
+    unsigned int shipCount;
+    float shipHalfExtent;
 } GlSprite;
+
+typedef struct GlShipPoint {
+    float x;
+    float y;
+    float depth;
+    float paletteLow;
+    float paletteHigh;
+    float blend;
+} GlShipPoint;
 
 typedef struct GlAtlasLayer {
     int nextX;
@@ -203,6 +228,7 @@ typedef enum GlFrameState {
 #define GL_RENDERER_SPRITE_ATLAS_LAYER_CAPACITY 4
 #define GL_RENDERER_SPRITE_ATLAS_PADDING 1
 #define GL_RENDERER_CACHED_FRAME_CAPACITY 2048
+#define GL_RENDERER_SHIP_POINT_LIMIT (1U << 21)
 
 static const GLchar g_vertexShaderSource[] =
     "#version 150\n"
@@ -305,6 +331,60 @@ static const GLchar g_spriteFragmentShaderSource[] =
     "        discard;\n"
     "}\n";
 
+static const GLchar g_shipVertexShaderSource[] =
+    "#version 150\n"
+    "in vec3 a_shipPosition;\n"
+    "in vec3 a_shipColour;\n"
+    "uniform float u_pointSize;\n"
+    "flat out vec3 v_colour;\n"
+    "void main()\n"
+    "{\n"
+    "    vec2 position;\n"
+    "    position.x = (a_shipPosition.x + 0.5) / 320.0 * 2.0 - 1.0;\n"
+    "    position.y = 1.0 - (a_shipPosition.y + 0.5) / 200.0 * 2.0;\n"
+    "    gl_Position = vec4(position, a_shipPosition.z, 1.0);\n"
+    "    gl_PointSize = u_pointSize;\n"
+    "    v_colour = a_shipColour;\n"
+    "}\n";
+
+/* Each point carries two palette entries and a blend between them.  The
+   palette is read here, per fragment, so palette fades act on ships and the
+   shading between ramp entries is continuous. */
+static const GLchar g_shipFragmentShaderSource[] =
+    "#version 150\n"
+    "uniform sampler2D u_palette;\n"
+    "uniform sampler2D u_baseIndices;\n"
+    "uniform sampler2D u_viewMask;\n"
+    "uniform int u_clearIndex;\n"
+    "uniform vec4 u_viewport;\n"
+    "uniform vec4 u_clip;\n"
+    "flat in vec3 v_colour;\n"
+    "out vec4 outputColour;\n"
+    "void main()\n"
+    "{\n"
+    "    vec2 edge = (gl_FragCoord.xy - u_viewport.xy) / u_viewport.zw;\n"
+    "    edge = vec2(edge.x * 320.0, (1.0 - edge.y) * 200.0);\n"
+    "    vec2 screen = edge - vec2(0.5);\n"
+    "    if (screen.x < u_clip.x || screen.y < u_clip.y ||\n"
+    "        screen.x > u_clip.z || screen.y > u_clip.w)\n"
+    "        discard;\n"
+    "    ivec2 logical = ivec2(floor(edge));\n"
+    "    if (logical.x < 0 || logical.y < 0 ||\n"
+    "        logical.x >= 320 || logical.y >= 200)\n"
+    "        discard;\n"
+    "    if (texelFetch(u_viewMask, logical, 0).r < 0.5)\n"
+    "        discard;\n"
+    "    int baseIndex = int(floor(\n"
+    "        texelFetch(u_baseIndices, logical, 0).r * 255.0 + 0.5));\n"
+    "    if (baseIndex != u_clearIndex)\n"
+    "        discard;\n"
+    "    vec3 low = texelFetch(u_palette,\n"
+    "        ivec2(int(v_colour.x + 0.5), 0), 0).rgb;\n"
+    "    vec3 high = texelFetch(u_palette,\n"
+    "        ivec2(int(v_colour.y + 0.5), 0), 0).rgb;\n"
+    "    outputColour = vec4(mix(low, high, v_colour.z), 1.0);\n"
+    "}\n";
+
 typedef struct GlRenderer {
     SDL_Window *window;
     SDL_GLContext context;
@@ -313,6 +393,19 @@ typedef struct GlRenderer {
     GLuint vertexBuffer;
     GLuint baseProgram;
     GLuint spriteProgram;
+    GLuint shipProgram;
+    GLuint shipVertexArray;
+    GLuint shipVertexBuffer;
+    GLint shipPaletteUniform;
+    GLint shipBaseUniform;
+    GLint shipMaskUniform;
+    GLint shipClearUniform;
+    GLint shipViewportUniform;
+    GLint shipClipUniform;
+    GLint shipPointSizeUniform;
+    GlShipPoint *shipPoints;
+    unsigned int shipPointCount;
+    unsigned int shipPointCapacity;
     GLuint baseTexture;
     GLuint paletteTexture;
     GLuint maskTexture;
@@ -352,6 +445,7 @@ static GlRenderer g_renderer;
 static void ResetRecordedSprites(void)
 {
     g_renderer.spriteCount = 0;
+    g_renderer.shipPointCount = 0;
 }
 
 static void ResetSpriteAtlasCache(void)
@@ -365,6 +459,9 @@ static void ReleaseRendererStorage(void)
 {
     free(g_renderer.decodeScratch);
     g_renderer.decodeScratch = 0;
+    free(g_renderer.shipPoints);
+    g_renderer.shipPoints = 0;
+    g_renderer.shipPointCapacity = 0;
     g_renderer.decodeScratchCapacity = 0;
     ResetRecordedSprites();
     ResetSpriteAtlasCache();
@@ -443,6 +540,7 @@ static int LoadGlFunctions(void)
                          "glDeleteTextures");
     LOAD_GL_FUNCTION(DeleteVertexArrays, GlDeleteVertexArraysProc,
                          "glDeleteVertexArrays");
+    LOAD_GL_FUNCTION(DepthFunc, GlDepthFuncProc, "glDepthFunc");
     LOAD_GL_FUNCTION(Disable, GlDisableProc, "glDisable");
     LOAD_GL_FUNCTION(DrawArrays, GlDrawArraysProc, "glDrawArrays");
     LOAD_GL_FUNCTION(Enable, GlEnableProc, "glEnable");
@@ -474,6 +572,8 @@ static int LoadGlFunctions(void)
     LOAD_GL_FUNCTION(TexSubImage3D, GlTexSubImage3DProc,
                          "glTexSubImage3D");
     LOAD_GL_FUNCTION(Uniform1i, GlUniform1iProc, "glUniform1i");
+    LOAD_GL_FUNCTION(Uniform1f, GlUniform1fProc, "glUniform1f");
+    LOAD_GL_FUNCTION(Uniform4f, GlUniform4fProc, "glUniform4f");
     LOAD_GL_FUNCTION(UseProgram, GlUseProgramProc, "glUseProgram");
     LOAD_GL_FUNCTION(VertexAttribPointer, GlVertexAttribPointerProc,
                          "glVertexAttribPointer");
@@ -519,7 +619,8 @@ static GLuint CompileGlShader(GLenum type, const GLchar *source)
     return shader;
 }
 
-static GLuint LinkGlProgram(const GLchar *fragmentSource)
+static GLuint LinkGlProgram(const GLchar *vertexSource,
+                            const GLchar *fragmentSource)
 {
     GLchar log[1024];
     GLsizei length;
@@ -528,7 +629,7 @@ static GLuint LinkGlProgram(const GLchar *fragmentSource)
     GLuint fragmentShader;
     GLuint program;
 
-    vertexShader = CompileGlShader(GL_VERTEX_SHADER, g_vertexShaderSource);
+    vertexShader = CompileGlShader(GL_VERTEX_SHADER, vertexSource);
     if (vertexShader == 0)
         return 0;
     fragmentShader = CompileGlShader(GL_FRAGMENT_SHADER, fragmentSource);
@@ -545,6 +646,8 @@ static GLuint LinkGlProgram(const GLchar *fragmentSource)
         g_renderer.gl.BindAttribLocation(program, 2, "a_atlasRect");
         g_renderer.gl.BindAttribLocation(program, 3, "a_clip");
         g_renderer.gl.BindAttribLocation(program, 4, "a_spriteInfo");
+        g_renderer.gl.BindAttribLocation(program, 0, "a_shipPosition");
+        g_renderer.gl.BindAttribLocation(program, 1, "a_shipColour");
         g_renderer.gl.LinkProgram(program);
         g_renderer.gl.GetProgramiv(program, GL_LINK_STATUS, &status);
         if (status == GL_FALSE) {
@@ -578,6 +681,28 @@ static int LoadGlUniformLocations(void)
         g_renderer.spriteProgram, "u_viewMask");
     g_renderer.spriteClearUniform = g_renderer.gl.GetUniformLocation(
         g_renderer.spriteProgram, "u_clearIndex");
+    g_renderer.shipPaletteUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.shipProgram, "u_palette");
+    g_renderer.shipBaseUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.shipProgram, "u_baseIndices");
+    g_renderer.shipMaskUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.shipProgram, "u_viewMask");
+    g_renderer.shipClearUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.shipProgram, "u_clearIndex");
+    g_renderer.shipViewportUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.shipProgram, "u_viewport");
+    g_renderer.shipClipUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.shipProgram, "u_clip");
+    g_renderer.shipPointSizeUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.shipProgram, "u_pointSize");
+    if (g_renderer.shipPaletteUniform < 0 || g_renderer.shipBaseUniform < 0 ||
+        g_renderer.shipMaskUniform < 0 || g_renderer.shipClearUniform < 0 ||
+        g_renderer.shipViewportUniform < 0 ||
+        g_renderer.shipClipUniform < 0 ||
+        g_renderer.shipPointSizeUniform < 0) {
+        fprintf(stderr, "OpenGL ship uniforms are unavailable.\n");
+        return 0;
+    }
     if (g_renderer.baseIndicesUniform < 0 ||
         g_renderer.basePaletteUniform < 0 ||
         g_renderer.spriteIndicesUniform < 0 ||
@@ -902,15 +1027,8 @@ static void BuildRecordedSpriteVertices(const GlSprite *sprite,
     vertices[5] = corners[3];
 }
 
-static void DrawRecordedSprites(float outputScale)
+static void BindSpaceLayerTextures(void)
 {
-    unsigned int index;
-
-    if (g_renderer.spriteCount == 0)
-        return;
-    g_renderer.gl.Enable(GL_BLEND);
-    g_renderer.gl.BlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-    g_renderer.gl.UseProgram(g_renderer.spriteProgram);
     g_renderer.gl.ActiveTexture(GL_TEXTURE0);
     g_renderer.gl.BindTexture(GL_TEXTURE_2D_ARRAY,
                               g_renderer.spriteAtlasTexture);
@@ -920,28 +1038,109 @@ static void DrawRecordedSprites(float outputScale)
     g_renderer.gl.BindTexture(GL_TEXTURE_2D, g_renderer.baseTexture);
     g_renderer.gl.ActiveTexture(GL_TEXTURE3);
     g_renderer.gl.BindTexture(GL_TEXTURE_2D, g_renderer.maskTexture);
+}
+
+static void DrawSpriteRun(unsigned int first, unsigned int end)
+{
+    g_renderer.gl.BindVertexArray(g_renderer.vertexArray);
+    g_renderer.gl.Enable(GL_BLEND);
+    g_renderer.gl.BlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    g_renderer.gl.UseProgram(g_renderer.spriteProgram);
+    BindSpaceLayerTextures();
     g_renderer.gl.Uniform1i(g_renderer.spriteIndicesUniform, 0);
     g_renderer.gl.Uniform1i(g_renderer.spritePaletteUniform, 1);
     g_renderer.gl.Uniform1i(g_renderer.spriteBaseUniform, 2);
     g_renderer.gl.Uniform1i(g_renderer.spriteMaskUniform, 3);
     g_renderer.gl.Uniform1i(g_renderer.spriteClearUniform,
                             g_renderer.spaceClearColour);
+    g_renderer.gl.DrawArrays(GL_TRIANGLES, (GLint)(first * 6U),
+                             (GLsizei)((end - first) * 6U));
+    g_renderer.gl.Disable(GL_BLEND);
+}
+
+/* Ships are opaque points with their own depth test.  The depth buffer is
+   cleared per ship so painter ordering between objects is untouched. */
+static void DrawRecordedShip(const GlSprite *ship, float outputScale,
+                             int viewportLeft, int viewportBottom,
+                             int viewportWidth, int viewportHeight)
+{
+    float pointSize;
+
+    pointSize = 2.0f * ship->shipHalfExtent * outputScale;
+    if (pointSize < 1.0f)
+        pointSize = 1.0f;
+    else if (pointSize > 64.0f)
+        pointSize = 64.0f;
+    g_renderer.gl.BindVertexArray(g_renderer.shipVertexArray);
+    g_renderer.gl.BindBuffer(GL_ARRAY_BUFFER, g_renderer.shipVertexBuffer);
+    g_renderer.gl.BufferData(
+        GL_ARRAY_BUFFER,
+        (GLsizeiptr)(sizeof(GlShipPoint) * (size_t)ship->shipCount),
+        g_renderer.shipPoints + ship->shipFirst, GL_STREAM_DRAW);
+    g_renderer.gl.UseProgram(g_renderer.shipProgram);
+    BindSpaceLayerTextures();
+    g_renderer.gl.Uniform1i(g_renderer.shipPaletteUniform, 1);
+    g_renderer.gl.Uniform1i(g_renderer.shipBaseUniform, 2);
+    g_renderer.gl.Uniform1i(g_renderer.shipMaskUniform, 3);
+    g_renderer.gl.Uniform1i(g_renderer.shipClearUniform,
+                            g_renderer.spaceClearColour);
+    g_renderer.gl.Uniform4f(g_renderer.shipViewportUniform,
+                            (float)viewportLeft, (float)viewportBottom,
+                            (float)viewportWidth, (float)viewportHeight);
+    g_renderer.gl.Uniform4f(g_renderer.shipClipUniform,
+                            (float)ship->clipLeft - 0.5f,
+                            (float)ship->clipTop - 0.5f,
+                            (float)ship->clipRight + 0.5f,
+                            (float)ship->clipBottom + 0.5f);
+    g_renderer.gl.Uniform1f(g_renderer.shipPointSizeUniform, pointSize);
+    g_renderer.gl.Enable(GL_PROGRAM_POINT_SIZE);
+    g_renderer.gl.Enable(GL_DEPTH_TEST);
+    g_renderer.gl.DepthFunc(GL_LESS);
+    g_renderer.gl.Clear(GL_DEPTH_BUFFER_BIT);
+    g_renderer.gl.DrawArrays(GL_POINTS, 0, (GLsizei)ship->shipCount);
+    g_renderer.gl.Disable(GL_DEPTH_TEST);
+    g_renderer.gl.Disable(GL_PROGRAM_POINT_SIZE);
+}
+
+static void DrawRecordedSprites(float outputScale, int viewportLeft,
+                                int viewportBottom, int viewportWidth,
+                                int viewportHeight)
+{
+    unsigned int index;
+    unsigned int runStart;
+
+    if (g_renderer.spriteCount == 0)
+        return;
     index = 0;
     while (index < g_renderer.spriteCount) {
-        BuildRecordedSpriteVertices(
-            &g_renderer.recordedSprites[index], outputScale,
-            &g_renderer.spriteVertices[(size_t)index * 6U]);
+        if (g_renderer.recordedSprites[index].cachedFrame != 0)
+            BuildRecordedSpriteVertices(
+                &g_renderer.recordedSprites[index], outputScale,
+                &g_renderer.spriteVertices[(size_t)index * 6U]);
         index++;
     }
+    g_renderer.gl.BindVertexArray(g_renderer.vertexArray);
     g_renderer.gl.BindBuffer(GL_ARRAY_BUFFER, g_renderer.vertexBuffer);
     g_renderer.gl.BufferData(
         GL_ARRAY_BUFFER,
         (GLsizeiptr)(sizeof(GlVertex) *
                      (size_t)g_renderer.spriteCount * 6U),
         g_renderer.spriteVertices, GL_STREAM_DRAW);
-    g_renderer.gl.DrawArrays(GL_TRIANGLES, 0,
-                             (GLsizei)(g_renderer.spriteCount * 6));
-    g_renderer.gl.Disable(GL_BLEND);
+    index = 0;
+    while (index < g_renderer.spriteCount) {
+        if (g_renderer.recordedSprites[index].cachedFrame == 0) {
+            DrawRecordedShip(&g_renderer.recordedSprites[index], outputScale,
+                             viewportLeft, viewportBottom, viewportWidth,
+                             viewportHeight);
+            index++;
+            continue;
+        }
+        runStart = index;
+        while (index < g_renderer.spriteCount &&
+               g_renderer.recordedSprites[index].cachedFrame != 0)
+            index++;
+        DrawSpriteRun(runStart, index);
+    }
 }
 
 static int RenderGlFrame(const unsigned char *pixels,
@@ -983,7 +1182,9 @@ static int RenderGlFrame(const unsigned char *pixels,
     g_renderer.gl.BindVertexArray(g_renderer.vertexArray);
     DrawBaseFrame();
     if (drawSprites)
-        DrawRecordedSprites((float)viewportWidth / SDL_PORT_FRAME_WIDTH);
+        DrawRecordedSprites((float)viewportWidth / SDL_PORT_FRAME_WIDTH,
+                            viewportLeft, viewportBottom, viewportWidth,
+                            viewportHeight);
     SDL_GL_SwapWindow(g_renderer.window);
     return 1;
 }
@@ -1073,9 +1274,13 @@ int SdlGlRendererInitialize(SDL_Window *window)
         maxArrayTextureLayers < GL_RENDERER_SPRITE_ATLAS_LAYER_CAPACITY
             ? maxArrayTextureLayers
             : GL_RENDERER_SPRITE_ATLAS_LAYER_CAPACITY;
-    g_renderer.baseProgram = LinkGlProgram(g_baseFragmentShaderSource);
-    g_renderer.spriteProgram = LinkGlProgram(g_spriteFragmentShaderSource);
-    if (g_renderer.baseProgram == 0 || g_renderer.spriteProgram == 0) {
+    g_renderer.baseProgram = LinkGlProgram(g_vertexShaderSource, g_baseFragmentShaderSource);
+    g_renderer.spriteProgram = LinkGlProgram(g_vertexShaderSource,
+                                              g_spriteFragmentShaderSource);
+    g_renderer.shipProgram = LinkGlProgram(g_shipVertexShaderSource,
+                                           g_shipFragmentShaderSource);
+    if (g_renderer.baseProgram == 0 || g_renderer.spriteProgram == 0 ||
+        g_renderer.shipProgram == 0) {
         SdlGlRendererShutdown();
         return 0;
     }
@@ -1108,6 +1313,25 @@ int SdlGlRendererInitialize(SDL_Window *window)
     g_renderer.gl.VertexAttribPointer(
         4, 2, GL_FLOAT, GL_FALSE, sizeof(GlVertex),
         (const void *)offsetof(GlVertex, magnification));
+
+    g_renderer.gl.GenVertexArrays(1, &g_renderer.shipVertexArray);
+    g_renderer.gl.GenBuffers(1, &g_renderer.shipVertexBuffer);
+    if (g_renderer.shipVertexArray == 0 || g_renderer.shipVertexBuffer == 0) {
+        fprintf(stderr, "OpenGL ship buffer creation failed.\n");
+        SdlGlRendererShutdown();
+        return 0;
+    }
+    g_renderer.gl.BindVertexArray(g_renderer.shipVertexArray);
+    g_renderer.gl.BindBuffer(GL_ARRAY_BUFFER, g_renderer.shipVertexBuffer);
+    g_renderer.gl.EnableVertexAttribArray(0);
+    g_renderer.gl.VertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
+                                      sizeof(GlShipPoint), 0);
+    g_renderer.gl.EnableVertexAttribArray(1);
+    g_renderer.gl.VertexAttribPointer(
+        1, 3, GL_FLOAT, GL_FALSE, sizeof(GlShipPoint),
+        (const void *)(uintptr_t)offsetof(GlShipPoint, paletteLow));
+    g_renderer.gl.BindVertexArray(g_renderer.vertexArray);
+    g_renderer.gl.BindBuffer(GL_ARRAY_BUFFER, g_renderer.vertexBuffer);
 
     g_renderer.gl.GenTextures(4, textures);
     g_renderer.baseTexture = textures[0];
@@ -1162,6 +1386,14 @@ void SdlGlRendererShutdown(void)
         g_renderer.vertexBuffer != 0) {
         g_renderer.gl.DeleteBuffers(1, &g_renderer.vertexBuffer);
     }
+    if (canDeleteResources && g_renderer.gl.DeleteBuffers != 0 &&
+        g_renderer.shipVertexBuffer != 0) {
+        g_renderer.gl.DeleteBuffers(1, &g_renderer.shipVertexBuffer);
+    }
+    if (canDeleteResources && g_renderer.gl.DeleteVertexArrays != 0 &&
+        g_renderer.shipVertexArray != 0) {
+        g_renderer.gl.DeleteVertexArrays(1, &g_renderer.shipVertexArray);
+    }
     if (canDeleteResources && g_renderer.gl.DeleteVertexArrays != 0 &&
         g_renderer.vertexArray != 0) {
         g_renderer.gl.DeleteVertexArrays(1, &g_renderer.vertexArray);
@@ -1171,6 +1403,8 @@ void SdlGlRendererShutdown(void)
             g_renderer.gl.DeleteProgram(g_renderer.baseProgram);
         if (g_renderer.spriteProgram != 0)
             g_renderer.gl.DeleteProgram(g_renderer.spriteProgram);
+        if (g_renderer.shipProgram != 0)
+            g_renderer.gl.DeleteProgram(g_renderer.shipProgram);
     }
     if (g_renderer.context != 0)
         SDL_GL_DeleteContext(g_renderer.context);
@@ -1286,6 +1520,69 @@ int SdlGlRendererRecordSpaceSprite(const Viewport *viewport, float x,
         (viewport->right + g_renderer.spaceLayerOffsetX);
     sprite->clipBottom =
         (viewport->bottom + g_renderer.spaceLayerOffsetY);
+    g_renderer.spriteCount++;
+    return 1;
+}
+
+int SdlGlRendererRecordShip(const Viewport *viewport, const float *points,
+                            int count, float footprintHalfExtent)
+{
+    GlSprite *ship;
+    GlShipPoint *destination;
+    unsigned int newCapacity;
+    int index;
+
+    if (g_renderer.frameState != GL_RENDERER_FRAME_RECORDING ||
+        g_renderer.useSoftwareForRestOfFrame)
+        return 0;
+    if (viewport == 0 || points == 0 || count <= 0)
+        return 0;
+    if (g_renderer.spriteCount >= GL_RENDERER_RECORDED_SPRITE_CAPACITY ||
+        g_renderer.shipPointCount + (unsigned int)count >
+            GL_RENDERER_SHIP_POINT_LIMIT) {
+        g_renderer.useSoftwareForRestOfFrame = 1;
+        return 0;
+    }
+    if (g_renderer.shipPointCount + (unsigned int)count >
+        g_renderer.shipPointCapacity) {
+        GlShipPoint *grown;
+
+        newCapacity = g_renderer.shipPointCapacity != 0
+                          ? g_renderer.shipPointCapacity
+                          : 65536U;
+        while (newCapacity < g_renderer.shipPointCount + (unsigned int)count)
+            newCapacity *= 2U;
+        grown = realloc(g_renderer.shipPoints,
+                        sizeof(GlShipPoint) * (size_t)newCapacity);
+        if (grown == 0) {
+            g_renderer.useSoftwareForRestOfFrame = 1;
+            return 0;
+        }
+        g_renderer.shipPoints = grown;
+        g_renderer.shipPointCapacity = newCapacity;
+    }
+    destination = g_renderer.shipPoints + g_renderer.shipPointCount;
+    for (index = 0; index < count; index++) {
+        destination[index].x =
+            points[index * 6] + (float)g_renderer.spaceLayerOffsetX;
+        destination[index].y =
+            points[index * 6 + 1] + (float)g_renderer.spaceLayerOffsetY;
+        destination[index].depth = points[index * 6 + 2];
+        destination[index].paletteLow = points[index * 6 + 3];
+        destination[index].paletteHigh = points[index * 6 + 4];
+        destination[index].blend = points[index * 6 + 5];
+    }
+    ship = &g_renderer.recordedSprites[g_renderer.spriteCount];
+    memset(ship, 0, sizeof(*ship));
+    ship->clipLeft = (short)(viewport->left + g_renderer.spaceLayerOffsetX);
+    ship->clipTop = (short)(viewport->top + g_renderer.spaceLayerOffsetY);
+    ship->clipRight = (short)(viewport->right + g_renderer.spaceLayerOffsetX);
+    ship->clipBottom =
+        (short)(viewport->bottom + g_renderer.spaceLayerOffsetY);
+    ship->shipFirst = g_renderer.shipPointCount;
+    ship->shipCount = (unsigned int)count;
+    ship->shipHalfExtent = footprintHalfExtent;
+    g_renderer.shipPointCount += (unsigned int)count;
     g_renderer.spriteCount++;
     return 1;
 }

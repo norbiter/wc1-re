@@ -54,6 +54,11 @@ static const unsigned char g_abEgaHardwarePaletteRgb[16][3] = {
     {0xff, 0x55, 0x55}, {0xff, 0x55, 0xff}, {0xff, 0xff, 0x55}, {0xff, 0xff, 0xff},
 };
 
+int SdlEgaDitherEnabled(void)
+{
+    return g_bEgaDitherEnabled;
+}
+
 void SdlEnableEgaDither(void)
 {
     int index;
@@ -235,9 +240,10 @@ int SdlRecordSpaceSprite(
      * indices and cannot be sampled through the fixed 16-colour palette. */
     if (!SdlUsingGlRenderer() || g_bEgaDitherEnabled)
         return 0;
-    /* The point-cloud ships are composed into the indexed frame, so every
-     * sprite has to be too or the enhanced layer would draw over them. */
-    if (SdlShip3dEnabled())
+    /* Unless the GL layer draws them, the point-cloud ships are composed
+     * into the indexed frame, so every sprite has to be too or the enhanced
+     * layer would draw over them. */
+    if (SdlShip3dEnabled() && !SdlShip3dUsesGl())
         return 0;
     return SdlGlRendererRecordSpaceSprite(
         viewport, x, y, shape, frame, angle, scale, flip);

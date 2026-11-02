@@ -40,7 +40,8 @@ int SdlConfigureVideoWindow(Uint32 *windowFlags)
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2) != 0 ||
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
                             SDL_GL_CONTEXT_PROFILE_CORE) != 0 ||
-        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1) != 0)
+        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1) != 0 ||
+        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24) != 0)
         return 0;
 #ifdef __APPLE__
     if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS,
