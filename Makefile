@@ -578,6 +578,7 @@ MODERN_GAME_HOST_SRCS = \
 	src/sdl/music.c \
 	src/sdl/ship3d.c \
 	src/sdl/hitsphere.c \
+	src/sdl/aithrottle.c \
 	src/sdl/missionmenu.c \
 	src/sdl/hullfield.c \
 	src/sdl/video.c

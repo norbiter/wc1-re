@@ -160,6 +160,10 @@ int regulate_turn(short obj)
     if (aeObjectClass[obj] != OBJECT_CLASS_CAPITAL_SHIP &&
         handle_collisions(obj) != 0)
         return 1;
+#ifdef SDL_PORT
+    if (acTurnRegulatorsArray[obj] <= 1 && SdlAiThrottleDefers(obj))
+        return 1;
+#endif
     count = --acTurnRegulatorsArray[obj];
     if (count > 0)
         return 1;

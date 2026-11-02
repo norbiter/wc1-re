@@ -123,6 +123,10 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlShip3dEnable(argument + 9);
         } else if (strcmp(argument, "--hitspheres") == 0) {
             SdlHitSphereEnable();
+        } else if (strcmp(argument, "--ai-throttle") == 0) {
+            SdlAiThrottleEnable(0);
+        } else if (strncmp(argument, "--ai-throttle=", 14) == 0) {
+            SdlAiThrottleEnable(atoi(argument + 14));
         } else if (strcmp(argument, "--mission-menu") == 0) {
             SdlMissionMenuEnable();
         } else if (strcmp(argument, "--cheats") == 0) {

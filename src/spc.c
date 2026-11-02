@@ -1024,6 +1024,9 @@ unsigned int update_objects_in_space(void)
     short obj;
 
     clear_crash_cache();
+#ifdef SDL_PORT
+    SdlAiThrottleBeginTick();
+#endif
     obj = 0;
     do {
         if (aeObjectClass[obj] == OBJECT_CLASS_FUTURION) {
