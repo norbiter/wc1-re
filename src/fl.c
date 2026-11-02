@@ -815,6 +815,15 @@ void Mkill_missile(short ship, short target)
         maneuver_complete(ship);
         return;
     }
+#ifdef SDL_PORT
+    /* missile_on_tail does not set nTargetShip, so it can still be -1 from
+     * an earlier scan; the original then used the memory before the
+     * position array as the target. Give up the maneuver instead. */
+    if (nTargetShip == -1) {
+        maneuver_complete(ship);
+        return;
+    }
+#endif
     ship_vs_ship(ship, nTargetShip);
     if (nFacingToTargetValue < 0) {
         reset_maneuver(ship, MANEUVER_FISH_HOOK);
