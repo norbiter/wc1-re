@@ -180,7 +180,7 @@ MODERN_CPPFLAGS = -DSDL_PORT=1 -DSDL_MAIN_HANDLED -Iinclude \
 SWC_CPPFLAGS = -DSDL_PORT=1 -DSDL_MAIN_HANDLED -Iinclude \
 	$(MODERN_SDL_CFLAGS)
 MODERN_CFLAGS ?= -O2 -std=c11 -Wno-return-type -Wno-return-mismatch \
-	-Wno-error=incompatible-pointer-types
+	-Wno-error=incompatible-pointer-types -Wno-address-of-packed-member
 MODERN_CXXFLAGS ?= -O2 -std=c++11
 MODERN_DEPFLAGS = -MMD -MP
 MODERN_SECTION_FLAGS = -ffunction-sections -fdata-sections
@@ -192,12 +192,17 @@ override MODERN_SANITIZER_FLAGS = -g -O1 -fsanitize=fuzzer-no-link,address,undef
 else ifeq ($(MODERN_RELEASE),1)
 override MODERN_SANITIZER_FLAGS =
 else
-override MODERN_SANITIZER_FLAGS = -fsanitize=address,undefined -fno-omit-frame-pointer
+override MODERN_SANITIZER_FLAGS = -fsanitize=address,undefined \
+	-fno-sanitize=alignment -fno-omit-frame-pointer
 endif
 MODERN_DEAD_STRIP_DARWIN = -Wl,-dead_strip -Wl,-no_fixup_chains
 MODERN_DEAD_STRIP_OTHER = -Wl,--gc-sections
+# The packed game structs hold pointers at odd offsets, which ld64 reports as
+# "pointer not aligned" (hundreds of lines).  Harmless on x86/arm64; -w drops
+# all ld64 warnings.
+MODERN_QUIET_LD_DARWIN = -Wl,-w
 MODERN_DEAD_STRIP_FLAGS = $(if $(filter Darwin,$(UNAME_S)),\
-	$(MODERN_DEAD_STRIP_DARWIN),$(MODERN_DEAD_STRIP_OTHER))
+	$(MODERN_DEAD_STRIP_DARWIN) $(MODERN_QUIET_LD_DARWIN),$(MODERN_DEAD_STRIP_OTHER))
 
 # Where the retail executable lives.  `make data/full/WC1.ORI.EXE` copies it out
 # of the sibling analysis tree so this repo never has to vendor the binary.
