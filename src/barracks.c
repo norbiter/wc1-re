@@ -800,6 +800,10 @@ void LoadGameFromSlot(short slot, CampaignState *campaign,
             bCampaignActive = 1;
         }
         ReleaseModalTextPanel();
+#ifdef SDL_PORT
+        if (loaded != 0)
+            SdlMissionMenuRun(campaign);
+#endif
         if (loaded == 0) {
             ShowModalMessage(_("Error: Game %d not loaded."), slot);
         } else if (nOriginDevUnlock != 0) {
@@ -1106,7 +1110,13 @@ void HandleBarracksBunkSelection(Viewport *viewport,
         SaveGameWithNamePrompt(region / 2, &stCampaignState,
                                aPilotEntriesList, aMissionObjectivesArray);
     } else if (region % 2 == 0) {
+#ifdef SDL_PORT
+        /* The mission picker has its own prompt; skip Y/N when Alt opens it. */
+        if (SdlMissionMenuRequested() ||
+            ConfirmAwakenAfterBadData(region / 2) != 0)
+#else
         if (ConfirmAwakenAfterBadData(region / 2) != 0)
+#endif
             LoadGameFromSlot(region / 2, &stCampaignState,
                              aPilotEntriesList, aMissionObjectivesArray);
     } else if (ConfirmReplaceFaultyData(region / 2) != 0) {

@@ -123,6 +123,8 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlShip3dEnable(argument + 9);
         } else if (strcmp(argument, "--hitspheres") == 0) {
             SdlHitSphereEnable();
+        } else if (strcmp(argument, "--mission-menu") == 0) {
+            SdlMissionMenuEnable();
         } else if (strcmp(argument, "--cheats") == 0) {
             options->cheatMode = 1;
             options->explicitOptions |= SDL_LAUNCHER_EXPLICIT_CHEATS;

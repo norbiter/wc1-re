@@ -281,6 +281,10 @@ float SdlGetHullFieldRadius(const HullField *field);
 const unsigned char *SdlGetPaletteQuads(void);
 void SdlHitSphereEnable(void);
 int SdlHitSphereEnabled(void);
+void SdlMissionMenuEnable(void);
+int SdlMissionMenuRequested(void);
+struct CampaignState;
+void SdlMissionMenuRun(struct CampaignState *campaign);
 void SdlHitSphereDraw(struct Viewport *viewport, short obj, float centerX,
                       float centerY);
 int SdlSetCursorPosition(int x, int y);
