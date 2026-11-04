@@ -1413,6 +1413,12 @@ int object_collision(short obj)
         case OBJECT_CLASS_PROJECTILE:
             if (acObjOwnersTable[objectIndex] == partner)
                 break;
+#ifdef SDL_PORT
+            if (SdlNoFriendlyFireBlocks(obj, partner)) {
+                remove_object(obj);
+                return 0;
+            }
+#endif
             if (aeObjectClass[partner] >= OBJECT_CLASS_MISSILE) {
                 if (partner == 0) {
                     rectangular_to_spherical(
@@ -1495,6 +1501,12 @@ int object_collision(short obj)
         case OBJECT_CLASS_MISSILE:
             if (acObjOwnersTable[objectIndex] != partner ||
                 acObjCollisionGraceTicks[objectIndex] <= 0) {
+#ifdef SDL_PORT
+                if (SdlNoFriendlyFireBlocks(obj, partner)) {
+                    remove_object(obj);
+                    return 0;
+                }
+#endif
                 ScaleFixedVector(&aShipVelocity[objectIndex],
                                  awObjMassArray[objectIndex] << 8,
                                  &response);

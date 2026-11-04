@@ -1478,6 +1478,9 @@ int explosion_shock_wave(short obj, short blastDamage)
     other = 0;
     for (; other < 10; other++) {
         if (other != obj &&
+#ifdef SDL_PORT
+            !SdlNoFriendlyFireSpares(the_creator(obj), other) &&
+#endif
             aeObjectClass[other] >= OBJECT_CLASS_SHIP) {
             ComputeVectorDelta(&aShipPositionsArray[obj],
                                &aShipPositionsArray[other], &delta);
