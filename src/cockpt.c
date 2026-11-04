@@ -2300,7 +2300,13 @@ void draw_nav_pointer(void)
 /* Function start: 0x416AC0 */
 unsigned int overlay_head_up_display(void)
 {
+#ifdef SDL_PORT
+    /* --smooth's extra frames redraw the overlay without ticking it. */
+    if (!SdlSmoothSubFrame())
+        target_locking(acShipTargetTable[0]);
+#else
     target_locking(acShipTargetTable[0]);
+#endif
     if (message_showing() && nCommSpeakerObject != -1) {
         cLastTargetObject =
             nCommSpeakerObject;
@@ -2310,7 +2316,11 @@ unsigned int overlay_head_up_display(void)
                         &stPreviousTargetBracketBounds);
     }
     if (nTargetLockCountdown == 0) {
+#ifdef SDL_PORT
+        if ((short)(nRenderedSpaceFrame % 2) == 0 && !SdlSmoothSubFrame())
+#else
         if ((short)(nRenderedSpaceFrame % 2) == 0)
+#endif
             bTargetBracketVisible ^= 1;
         if (bTargetBracketVisible == 1) {
             draw_target_box(cRedColour,

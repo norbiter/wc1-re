@@ -2237,7 +2237,13 @@ int RunSpaceFlight(short entryNavPoint)
             ReadPerformanceCounter(&liSimulationDone);
             frameReady = RenderSpaceViewFrame();
             ReadPerformanceCounter(&liRenderDoneCounter);
+#ifdef SDL_PORT
+            SdlSmoothHudBegin();
+#endif
             update_cockpit();
+#ifdef SDL_PORT
+            SdlSmoothHudEnd();
+#endif
         } else {
             liSimulationDone =
                 liRenderDoneCounter =
@@ -2246,8 +2252,15 @@ int RunSpaceFlight(short entryNavPoint)
         ReadPerformanceCounter(&liFlightAfterCockpitCounter);
         if (frameReady != 0) {
             frameReady = 0;
+#ifdef SDL_PORT
+            SdlSmoothBeginPresent(0);
+#endif
             DIBslam();
             DIBslamReal();
+#ifdef SDL_PORT
+            if (SdlSmoothFlightSubFrames() != 0)
+                nArcadeState = 5;
+#endif
         }
         ReadPerformanceCounter(&liFlightFrameEndCounter);
         nFlightPresentDelta =

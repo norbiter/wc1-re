@@ -194,6 +194,13 @@ void ReportSpaceFlightMaxFps(float adjustment)
         SetSpaceFlightFrameTiming();
 }
 
+#ifdef SDL_PORT
+long SdlGetSpaceFlightTickIntervalMs(void)
+{
+    return (long)(1000.0 / fSpaceFlightFrameRate);
+}
+#endif
+
 /* Function start: 0x4320E0 */
 void SetSpaceFlightFrameTiming(void)
 {

@@ -123,6 +123,8 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlShip3dEnable(argument + 9);
         } else if (strcmp(argument, "--hitspheres") == 0) {
             SdlHitSphereEnable();
+        } else if (strcmp(argument, "--smooth") == 0) {
+            SdlSmoothEnable();
         } else if (strcmp(argument, "--ai-throttle") == 0) {
             SdlAiThrottleEnable(0);
         } else if (strncmp(argument, "--ai-throttle=", 14) == 0) {
