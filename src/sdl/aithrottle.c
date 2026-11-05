@@ -9,9 +9,9 @@
  * Collision avoidance, flight physics, weapons and the player are untouched. */
 #include "wc1.h"
 
-#define AI_THROTTLE_DEFAULT_SHIPS 6
-#define AI_THROTTLE_SHIPS_PER_STEP 3
-#define AI_THROTTLE_MAX_PERIOD 4
+#define AI_THROTTLE_DEFAULT_SHIPS 1
+#define AI_THROTTLE_SHIPS_PER_STEP 1
+#define AI_THROTTLE_MAX_PERIOD 12
 
 static int g_bAiThrottleEnabled;
 static int g_nAiThrottleShips = AI_THROTTLE_DEFAULT_SHIPS;
