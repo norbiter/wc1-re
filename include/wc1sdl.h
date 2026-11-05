@@ -296,6 +296,8 @@ int SdlNoFriendlyFireSpares(short attacker, short victim);
 int SdlNoFriendlyFireBlocks(short obj, short partner);
 void SdlLowMissileEnable(void);
 void SdlLowMissileTrim(short obj, short type);
+void SdlSturdyFriendsEnable(void);
+void SdlSturdyFriendsBoost(short obj, short type);
 void SdlGunRangeEnable(void);
 int SdlGunRangeActive(void);
 void SdlGunRangeDrawCrosshair(struct Viewport *viewport, short x, short y,

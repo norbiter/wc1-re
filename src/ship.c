@@ -281,6 +281,7 @@ void set_objects_data(short obj, enum ObjectType type, short owner)
                 memcpy(aSwcWeaponAmmo[obj], aSwcInitialWeaponAmmo[type],
                         sizeof(aSwcWeaponAmmo[obj]));
             SdlLowMissileTrim(obj, type);
+            SdlSturdyFriendsBoost(obj, type);
 #endif
 
             if (obj == 0) {
