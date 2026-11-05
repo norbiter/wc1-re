@@ -15,7 +15,11 @@ int SdlNoFriendlyFireSpares(short attacker, short victim)
 {
     if (!g_bNoFriendlyFire)
         return 0;
-    if (attacker < 0 || attacker == victim)
+    /* aeShipSide only covers the first 12 objects; anything beyond (capital
+       ships, turrets, mines) has no known side, so it is never spared. */
+    if (attacker < 0 || attacker >= (short)SDL_arraysize(aeShipSide) ||
+        victim < 0 || victim >= (short)SDL_arraysize(aeShipSide) ||
+        attacker == victim)
         return 0;
     if (aeObjectClass[victim] < OBJECT_CLASS_SHIP)
         return 0;
