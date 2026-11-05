@@ -527,6 +527,47 @@ static void SdlRepeatMouseKeys(void)
     }
 }
 
+/* The game acts on one key-down event per step (accelerate, for one), so a
+   held key must keep generating them.  The OS repeats only the most recently
+   pressed key, which made a second key stop the first.  Ignore OS repeats and
+   generate our own for every held key.  Each held physical key records the
+   game key its press became, so rebound keys repeat as what they stand for. */
+#define SDL_KEY_REPEAT_DELAY_MS 400
+#define SDL_KEY_REPEAT_INTERVAL_MS 33
+
+static Uint32 sdlKeyRepeatDue[SDL_NUM_SCANCODES];
+static SDL_Scancode sdlKeyRepeatGameKey[SDL_NUM_SCANCODES];
+
+static int SdlIsRepeatableKey(SDL_Scancode code)
+{
+    return code > SDL_SCANCODE_UNKNOWN && code < SDL_NUM_SCANCODES &&
+        !(code >= SDL_SCANCODE_LCTRL && code <= SDL_SCANCODE_RGUI);
+}
+
+static void SdlServiceKeyRepeats(void)
+{
+    const Uint8 *state;
+    Uint32 now;
+    int code;
+    SDL_Scancode key;
+
+    state = SDL_GetKeyboardState(0);
+    now = SDL_GetTicks();
+    for (code = 0; code < SDL_NUM_SCANCODES; code++) {
+        key = sdlKeyRepeatGameKey[code];
+        if (key == SDL_SCANCODE_UNKNOWN)
+            continue;
+        if (!state[code]) {
+            sdlKeyRepeatGameKey[code] = SDL_SCANCODE_UNKNOWN;
+            continue;
+        }
+        if ((Sint32)(now - sdlKeyRepeatDue[code]) < 0)
+            continue;
+        sdlKeyRepeatDue[code] = now + SDL_KEY_REPEAT_INTERVAL_MS;
+        SdlQueueGameKey(key, SDL_GetKeyFromScancode(key), 0, 1, 1);
+    }
+}
+
 static int SdlHandleKeyboardEvent(const SDL_KeyboardEvent *event)
 {
     int pressed;
@@ -534,6 +575,9 @@ static int SdlHandleKeyboardEvent(const SDL_KeyboardEvent *event)
     SDL_Keycode symbol;
 
     pressed = event->type == SDL_KEYDOWN;
+    if (pressed && event->repeat != 0 &&
+        SdlIsRepeatableKey(event->keysym.scancode))
+        return 0;
     if (pressed && event->repeat == 0 && event->keysym.sym == SDLK_q &&
         (event->keysym.mod & KMOD_GUI) != 0) {
         ShutdownGameWindow();
@@ -549,6 +593,12 @@ static int SdlHandleKeyboardEvent(const SDL_KeyboardEvent *event)
     if (key == SDL_SCANCODE_UNKNOWN)
         return 0;
     symbol = key == event->keysym.scancode ? event->keysym.sym : SDL_GetKeyFromScancode(key);
+    if (SdlIsRepeatableKey(event->keysym.scancode)) {
+        sdlKeyRepeatGameKey[event->keysym.scancode] =
+            pressed ? key : SDL_SCANCODE_UNKNOWN;
+        sdlKeyRepeatDue[event->keysym.scancode] =
+            SDL_GetTicks() + SDL_KEY_REPEAT_DELAY_MS;
+    }
     SdlQueueGameKey(key, symbol, event->keysym.mod, pressed, event->repeat);
     return 0;
 }
@@ -671,6 +721,7 @@ void SdlPumpEvents(void)
 
     SdlServiceOriginFxMusic();
     SdlRepeatMouseKeys();
+    SdlServiceKeyRepeats();
     while (SDL_PollEvent(&event)) {
         if (SdlHandleTownsTextInputEvent(&event))
             continue;
