@@ -4,6 +4,7 @@
 #include "slint/launcher_api.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const char *const g_apszSdlLauncherJoystickModes[] = {
@@ -45,6 +46,44 @@ static int SdlSetMt32RomArgument(const char *directory, SdlLauncherOptions *opti
     return GetCurrentDirectoryA(sizeof(current), current) &&
         SDL_snprintf(options->mt32Roms, sizeof(options->mt32Roms), "%s/%s", current,
                      directory) < (int)sizeof(options->mt32Roms);
+}
+
+static void SdlPrintUsage(FILE *stream)
+{
+    fputs("Usage: wc1 [options] [legacy game arguments]\n"
+          "\n"
+          "Options:\n"
+          "  --help                  Show this list and exit\n"
+          "  --gui                   Show the graphical launcher\n"
+          "  --swc-demo DIR          Run the Super Wing Commander demo in DIR\n"
+          "  --campaign=NAME         wc1, sm1 or sm2\n"
+          "  --transfer-pilot        Transfer the pilot into the chosen campaign\n"
+          "  --credits               Show the Super Wing Commander credits\n"
+          "  --language=CODE         en, es, ja or fr\n"
+          "  --voices=PATH           External voice catalog\n"
+          "  --fullscreen, --windowed  Start fullscreen or in a window\n"
+          "  --autosave, --no-autosave  Turn autosave checkpoints on or off\n"
+          "  --enhanced              Experimental GL sharp-bilinear rendering\n"
+          "  --ship3d[=PATH]         Render ships as 3D models\n"
+          "  --hitspheres            Show ship hit spheres\n"
+          "  --smooth                Smooth frame interpolation\n"
+          "  --ai-throttle[=N]       Tune AI update throttling\n"
+          "  --ff                    Suppress friendly fire\n"
+          "  --gun-range             Tint the crosshair by effective gun range\n"
+          "  --low-missile           Cap Kilrathi ships at one missile per type\n"
+          "  --mission-menu          Enable the mission menu\n"
+          "  --cheats                Enable cheat mode\n"
+          "  --joystick-debug        Log joystick input\n"
+          "  --joystick-rumble       Enable joystick rumble\n"
+          "  --joystick-mode=MODE    original, 4button-2axis, 4button-4axis\n"
+          "  --joystick-axes=MODE    twin-stick-roll, twin-stick-yaw, hotas-yaw,\n"
+          "                          hotas-roll, linear-throttle, rudder-yaw,\n"
+          "                          rudder-roll\n"
+          "  --ega                   EGA dithering\n"
+          "\n"
+          "Other arguments (without a leading \"--\") are passed to the game as\n"
+          "the original command-line tokens (b c f k q, Origin sN mN l, ...).\n",
+          stream);
 }
 
 static int SdlParsePortArguments(int *argumentCount, char **arguments,
@@ -111,6 +150,9 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
                 return 0;
             }
             options->explicitOptions |= SDL_LAUNCHER_EXPLICIT_LANGUAGE;
+        } else if (strcmp(argument, "--help") == 0) {
+            SdlPrintUsage(stdout);
+            exit(0);
         } else if (strcmp(argument, "--check") == 0) {
             fprintf(stderr, "The --check runtime mode has been removed.\n");
             return 0;
@@ -216,6 +258,10 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
         } else if (strcmp(argument, "--ega") == 0) {
             options->egaDither = 1;
             options->explicitOptions |= SDL_LAUNCHER_EXPLICIT_EGA;
+        } else if (argument[0] == '-' && argument[1] == '-') {
+            fprintf(stderr, "Unknown option: %s\n\n", argument);
+            SdlPrintUsage(stderr);
+            return 0;
         } else {
             if ((argument[0] == '-' ? argument[1] : argument[0]) == 'c') {
                 options->cockpitlessView = 1;
