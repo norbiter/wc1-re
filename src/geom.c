@@ -616,6 +616,13 @@ void init_ijk(short obj)
 /* Function start: 0x418FD0 */
 void copy_frame(short source, short destination)
 {
+#ifdef SDL_PORT
+    /* A source of -1 (e.g. set_formation_position when the leader has no
+     * ship yet) made the original copy whatever precedes the arrays. Keep
+     * the destination's current frame instead. */
+    if (source == -1 || destination == -1)
+        return;
+#endif
     aShipRightVector[destination] =
         aShipRightVector[source];
     aShipUpVector[destination] =
