@@ -294,6 +294,10 @@ int SdlAiThrottleDefers(short obj);
 void SdlNoFriendlyFireEnable(void);
 int SdlNoFriendlyFireSpares(short attacker, short victim);
 int SdlNoFriendlyFireBlocks(short obj, short partner);
+void SdlGunRangeEnable(void);
+int SdlGunRangeActive(void);
+void SdlGunRangeDrawCrosshair(struct Viewport *viewport, short x, short y,
+                              unsigned char *shape);
 void SdlMissionMenuEnable(void);
 int SdlMissionMenuRequested(void);
 struct CampaignState;

@@ -131,6 +131,8 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlAiThrottleEnable(atoi(argument + 14));
         } else if (strcmp(argument, "--ff") == 0) {
             SdlNoFriendlyFireEnable();
+        } else if (strcmp(argument, "--gun-range") == 0) {
+            SdlGunRangeEnable();
         } else if (strcmp(argument, "--mission-menu") == 0) {
             SdlMissionMenuEnable();
         } else if (strcmp(argument, "--cheats") == 0) {

@@ -2337,6 +2337,20 @@ unsigned int overlay_head_up_display(void)
                         &stTargetBracketBounds);
     }
 
+#ifdef SDL_PORT
+    if (SdlGunRangeActive()) {
+        short crosshairY = nCurrentViewCenterPosY;
+
+        if (bCockpitlessView != 0 && cCurrentCockpitView == 1)
+            crosshairY = (short)(crosshairY - 1);
+        else if (bCockpitlessView != 0 && cCurrentCockpitView == 3)
+            crosshairY = (short)(crosshairY + 14);
+        if (bCockpitlessView == 0 || cCurrentCockpitView <= 3)
+            SdlGunRangeDrawCrosshair(&stSpaceBufferViewport,
+                                     nCurrentViewCenterPosX, crosshairY,
+                                     pTgtLockShapePtr);
+    } else
+#endif
     if (bCockpitlessView != 0) {
         switch (cCurrentCockpitView) {
         case 0:
