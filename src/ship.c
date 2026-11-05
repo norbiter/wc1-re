@@ -280,6 +280,7 @@ void set_objects_data(short obj, enum ObjectType type, short owner)
             if (SdlSwcFlightActive() && obj >= 0 && obj < 10 && type >= 0 && type < 22)
                 memcpy(aSwcWeaponAmmo[obj], aSwcInitialWeaponAmmo[type],
                         sizeof(aSwcWeaponAmmo[obj]));
+            SdlLowMissileTrim(obj, type);
 #endif
 
             if (obj == 0) {

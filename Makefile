@@ -580,6 +580,7 @@ MODERN_GAME_HOST_SRCS = \
 	src/sdl/hitsphere.c \
 	src/sdl/aithrottle.c \
 	src/sdl/nofriendlyfire.c \
+	src/sdl/lowmissile.c \
 	src/sdl/gunrange.c \
 	src/sdl/smooth.c \
 	src/sdl/missionmenu.c \

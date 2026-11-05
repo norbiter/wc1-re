@@ -133,6 +133,8 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlNoFriendlyFireEnable();
         } else if (strcmp(argument, "--gun-range") == 0) {
             SdlGunRangeEnable();
+        } else if (strcmp(argument, "--low-missile") == 0) {
+            SdlLowMissileEnable();
         } else if (strcmp(argument, "--mission-menu") == 0) {
             SdlMissionMenuEnable();
         } else if (strcmp(argument, "--cheats") == 0) {
