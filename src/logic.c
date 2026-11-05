@@ -1329,9 +1329,18 @@ int abandoned(short obj, short other)
         aeShipSide[obj] != SIDE_KILRATHI &&
         RandomBelowOrEqual(8) == 0) {
         navPoint = FindNearestNavPoint(obj);
+#ifdef SDL_PORT
+        /* Fork fix: never write off a ship a protect/escort objective is
+         * scored on; it may merely be flying through a hostile sphere. */
+        if (nCurrentNavigationPoint != navPoint &&
+            hostile_sphere(obj, navPoint) != 0 &&
+            distance_from_object(obj, other) > 10000 &&
+            SdlIsProtectedObjectiveShip(obj) == 0) {
+#else
         if (nCurrentNavigationPoint != navPoint &&
             hostile_sphere(obj, navPoint) != 0 &&
             distance_from_object(obj, other) > 10000) {
+#endif
             explode(-1, obj);
             return 1;
         }

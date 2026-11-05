@@ -31,3 +31,22 @@ void SdlSturdyFriendsBoost(short obj, short type)
             DoubleShield(aasShipMaximumShieldTable[obj][facing]);
     }
 }
+
+/* Fork fix: abandoned() blows up any ship that wanders into a hostile nav
+ * sphere while the player is far away. Mission 7-1's second transport does
+ * exactly that on its way to the jump point, so it was scored as lost even
+ * though the player saved it. Ships that a protect/escort objective (types
+ * 2 and 3) refers to are exempt. */
+int SdlIsProtectedObjectiveShip(short obj)
+{
+    short objective;
+
+    for (objective = 0; objective < cMissionObjectiveCountValue; objective++) {
+        int type = aMissionObjectivesArray[objective].type;
+
+        if ((type == 2 || type == 3) &&
+            aMissionObjectivesArray[objective].index == nShipMissionIndices[obj])
+            return 1;
+    }
+    return 0;
+}
