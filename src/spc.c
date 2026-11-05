@@ -1564,6 +1564,11 @@ int object_collision(short obj)
                     SdlQueueJoystickCollisionRumble(damage);
 #endif
                 damage = ((damage * damage) >> 1);
+#ifdef SDL_PORT
+                /* Same-side bumps keep their bounce and stops but hurt no one. */
+                if (SdlNoFriendlyFireSpares(obj, partner))
+                    damage = 0;
+#endif
 
                 totalMass =
                     awObjMassArray[objectIndex] + awObjMassArray[partner];

@@ -1,6 +1,7 @@
 /* Fork-only: --ff makes a gun shot or missile that touches a ship on its
- * shooter's own side vanish without damage, force or hit effects, and spares
- * same-side ships from blast damage (missile, flak and ship explosions). */
+ * shooter's own side vanish without damage, force or hit effects, spares
+ * same-side ships from blast damage (missile, flak and ship explosions) and
+ * from ramming damage (the collision itself still happens). */
 #include "wc1.h"
 
 static int g_bNoFriendlyFire;
