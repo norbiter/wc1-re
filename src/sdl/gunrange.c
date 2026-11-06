@@ -1,5 +1,5 @@
 /* Fork-only: --gun-range shows whether the target is inside effective gun
- * range by tinting the central crosshair: dark green when out of range,
+ * range by tinting the central crosshair: dark grey when out of range,
  * the normal sprite colours when in range.
  *
  * Effective range of one gun is how far its shot flies relative to the
@@ -64,5 +64,5 @@ void SdlGunRangeDrawCrosshair(struct Viewport *viewport, short x, short y,
     if (SdlTargetInGunRange())
         DrawSpriteDefault(viewport, x, y, shape, 0);
     else
-        DrawSolidColourSprite(viewport, x, y, shape, 0, cDarkGreenColour);
+        DrawSolidColourSprite(viewport, x, y, shape, 0, cDarkGreyColour);
 }
