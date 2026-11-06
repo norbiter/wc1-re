@@ -303,6 +303,9 @@ void SdlGunRangeEnable(void);
 int SdlGunRangeActive(void);
 void SdlGunRangeDrawCrosshair(struct Viewport *viewport, short x, short y,
                               unsigned char *shape);
+void SdlMouseCurveEnable(int percent);
+int SdlMouseCurveActive(void);
+short SdlMouseCurveStep(short offset, int vertical);
 void SdlMissionMenuEnable(void);
 int SdlMissionMenuRequested(void);
 struct CampaignState;

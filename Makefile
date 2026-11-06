@@ -583,6 +583,7 @@ MODERN_GAME_HOST_SRCS = \
 	src/sdl/lowmissile.c \
 	src/sdl/sturdyfriends.c \
 	src/sdl/gunrange.c \
+	src/sdl/mousecurve.c \
 	src/sdl/smooth.c \
 	src/sdl/missionmenu.c \
 	src/sdl/hullfield.c \

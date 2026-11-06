@@ -1191,6 +1191,12 @@ unsigned int player_input(void)
                 ;
             if (vertical < 0)
                 pitchInput = -pitchInput;
+#ifdef SDL_PORT
+            if (SdlMouseCurveActive()) {
+                yawInput = SdlMouseCurveStep(horizontal, 0);
+                pitchInput = SdlMouseCurveStep(vertical, 1);
+            }
+#endif
             mouseX = event.x;
             viewportLeft = stSpaceBufferViewport.left;
             if (mouseX - 4 <= viewportLeft)

@@ -70,6 +70,8 @@ static void SdlPrintUsage(FILE *stream)
           "  --ai-throttle[=N]       Tune AI update throttling\n"
           "  --ff                    Suppress friendly fire\n"
           "  --gun-range             Tint the crosshair by effective gun range\n"
+          "  --mouse-curve[=PCT]     Smooth linear-to-exponential mouse steering;\n"
+          "                          PCT scales sensitivity (default 100)\n"
           "  --sturdy-friends        Double shields on friendly transports and capitals\n"
           "  --low-missile           Cap Kilrathi ships at one missile per type\n"
           "  --mission-menu          Enable the mission menu\n"
@@ -176,6 +178,10 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlNoFriendlyFireEnable();
         } else if (strcmp(argument, "--gun-range") == 0) {
             SdlGunRangeEnable();
+        } else if (strcmp(argument, "--mouse-curve") == 0) {
+            SdlMouseCurveEnable(0);
+        } else if (strncmp(argument, "--mouse-curve=", 14) == 0) {
+            SdlMouseCurveEnable(atoi(argument + 14));
         } else if (strcmp(argument, "--sturdy-friends") == 0) {
             SdlSturdyFriendsEnable();
         } else if (strcmp(argument, "--low-missile") == 0) {
