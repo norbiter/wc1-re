@@ -73,6 +73,7 @@ static void SdlPrintUsage(FILE *stream)
           "  --gun-range             Tint the crosshair by effective gun range\n"
           "  --mouse-curve[=PCT]     Smooth linear-to-exponential mouse steering;\n"
           "                          PCT scales sensitivity (default 100)\n"
+          "  --joystick-curve[=PCT]  Same curve for gamepad/joystick axes\n"
           "  --sturdy-friends        Double shields on friendly transports and capitals\n"
           "  --low-missile           Cap Kilrathi ships at one missile per type\n"
           "  --mission-menu          Enable the mission menu\n"
@@ -185,6 +186,10 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlMouseCurveEnable(0);
         } else if (strncmp(argument, "--mouse-curve=", 14) == 0) {
             SdlMouseCurveEnable(atoi(argument + 14));
+        } else if (strcmp(argument, "--joystick-curve") == 0) {
+            SdlJoystickCurveEnable(0);
+        } else if (strncmp(argument, "--joystick-curve=", 17) == 0) {
+            SdlJoystickCurveEnable(atoi(argument + 17));
         } else if (strcmp(argument, "--sturdy-friends") == 0) {
             SdlSturdyFriendsEnable();
         } else if (strcmp(argument, "--low-missile") == 0) {

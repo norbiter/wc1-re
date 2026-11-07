@@ -952,10 +952,12 @@ BOOL SdlReadJoystick(unsigned int deviceIndex, JOYINFO *information)
     if (device->joystick == 0)
         return FALSE;
 
-    information->wXpos =
-        (SdlReadJoystickAxis(device, 0) + 32768);
-    information->wYpos =
-        (SdlReadJoystickAxis(device, 1) + 32768);
+    information->wXpos = SdlJoystickCurveActive()
+        ? (SdlJoystickCurveAxis(SdlReadJoystickAxis(device, 0)) + 32768)
+        : (SdlReadJoystickAxis(device, 0) + 32768);
+    information->wYpos = SdlJoystickCurveActive()
+        ? (SdlJoystickCurveAxis(SdlReadJoystickAxis(device, 1)) + 32768)
+        : (SdlReadJoystickAxis(device, 1) + 32768);
     information->wZpos = 0;
     buttonState = 0;
     if (pCurrentEventManagerPump == get_player_input &&
@@ -1037,6 +1039,8 @@ static short SdlNormalizeFlightAxis(Sint16 raw)
     SdlJoystickAxis axis;
     int position;
 
+    if (SdlJoystickCurveActive())
+        raw = SdlJoystickCurveAxis(raw);
     SdlDefaultJoystickAxis(&axis);
     position = SdlShapeJoystickPosition(&axis, raw + 32768, g_nSdlJoystickDeadZone);
     return (short)SdlJoystickAxisStep(&axis, position,
