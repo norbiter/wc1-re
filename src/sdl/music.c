@@ -16,6 +16,7 @@
 #define SDL_SOUND_FULL_VOLUME 127
 #define SDL_SOUND_AUDIBLE_VOLUME 10
 #define SDL_SOUND_CENTRE_PAN 64
+#define SDL_WAVE_FULL_VOLUME 32000
 
 static CRITICAL_SECTION g_stSdlDosMusicAudioCriticalSection;
 static SDL_mutex *g_pSdlDosMusicMutex;
@@ -418,18 +419,19 @@ int SdlPlayGameSoundEffect(int soundNumber, int sourceObject, int looping)
         pan = SdlSoundEffectPan(&delta);
     }
 
-    if (SdlUsingOriginFxSoundEffects() || SdlUsingTownsData()) {
-        volume = SDL_SOUND_FULL_VOLUME;
-        if (sourceObject != -1) {
-            volume -= (int)((magnitude /
-                             SDL_SOUND_METRES_PER_VOLUME_STEP) >> 8);
-        }
-        if (volume < 0)
-            volume = 0;
-        if (volume < SDL_SOUND_AUDIBLE_VOLUME)
-            return 0;
-        if (SdlUsingTownsData())
-            return SdlPlayTownsEffect(soundNumber, volume, pan, sourceObject, looping) != 0;
+    volume = SDL_SOUND_FULL_VOLUME;
+    if (sourceObject != -1) {
+        volume -= (int)((magnitude /
+                         SDL_SOUND_METRES_PER_VOLUME_STEP) >> 8);
+    }
+    if (volume < 0)
+        volume = 0;
+    if (volume < SDL_SOUND_AUDIBLE_VOLUME)
+        return 0;
+
+    if (SdlUsingTownsData())
+        return SdlPlayTownsEffect(soundNumber, volume, pan, sourceObject, looping) != 0;
+    if (SdlUsingOriginFxSoundEffects()) {
         /* The driver takes a priority where the game passes looping;
          * UpdateFlightSound (003:0587) plays the fly-by at priority 8. */
         if (!SdlPlayDosSoundEffect(
@@ -443,13 +445,11 @@ int SdlPlayGameSoundEffect(int soundNumber, int sourceObject, int looping)
         return 1;
     }
 
-    if (sourceObject != -1) {
-        distance = magnitude > 32000 ? 32000 : (int)magnitude;
-    } else {
-        distance = 32000;
-    }
-    if (distance < 10)
-        return 0;
+    /* The Win32 build passes the raw distance (capped at 32000, and 32000
+       for global sounds) to playWAVE as the volume, so sounds get louder
+       the further away they are.  Use the same attenuation as the DOS
+       data path, scaled to the 32000 full-scale volume playWAVE expects. */
+    distance = volume * SDL_WAVE_FULL_VOLUME / SDL_SOUND_FULL_VOLUME;
     if (sourceObject != -1)
         aiSoundEffectSourceActiveArray[sourceObject] = 1;
     sprintf(szSfxWavePath, "sfx%02i.wav", soundNumber - 1);
