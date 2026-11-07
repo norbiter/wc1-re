@@ -103,7 +103,8 @@ int SdlShip3dEnabled(void)
 int SdlShip3dUsesGl(void)
 {
     return g_bShip3dEnabled && SdlUsingGlRenderer() &&
-           !SdlHitSphereEnabled() && !SdlEgaDitherEnabled();
+           !SdlHitSphereEnabled() && !SdlShieldFlashEnabled() &&
+           !SdlEgaDitherEnabled();
 }
 
 static unsigned char *ReadShip3dFile(const char *path, size_t *length)

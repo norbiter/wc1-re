@@ -66,6 +66,7 @@ static void SdlPrintUsage(FILE *stream)
           "  --enhanced              Experimental GL sharp-bilinear rendering\n"
           "  --ship3d[=PATH]         Render ships as 3D models\n"
           "  --hitspheres            Show ship hit spheres\n"
+          "  --shield-flash          Flash a hemisphere over a ship when its shields take a hit\n"
           "  --smooth                Smooth frame interpolation\n"
           "  --ai-throttle[=N]       Tune AI update throttling\n"
           "  --ff                    Suppress friendly fire\n"
@@ -168,6 +169,8 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlShip3dEnable(argument + 9);
         } else if (strcmp(argument, "--hitspheres") == 0) {
             SdlHitSphereEnable();
+        } else if (strcmp(argument, "--shield-flash") == 0) {
+            SdlShieldFlashEnable();
         } else if (strcmp(argument, "--smooth") == 0) {
             SdlSmoothEnable();
         } else if (strcmp(argument, "--ai-throttle") == 0) {

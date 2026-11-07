@@ -1033,6 +1033,8 @@ void draw_sorted_objects_to_buffer(void)
                                       enhancedScreenX, enhancedScreenY)) {
                         SdlHitSphereDraw(&stSpaceBufferViewport, (short)obj,
                                          enhancedScreenX, enhancedScreenY);
+                        SdlShieldFlashDraw(&stSpaceBufferViewport, (short)obj,
+                                           enhancedScreenX, enhancedScreenY);
                         break;
                     }
                     if (!SdlRecordSpaceSprite(
@@ -1052,6 +1054,8 @@ void draw_sorted_objects_to_buffer(void)
 #ifdef SDL_PORT
                     SdlHitSphereDraw(&stSpaceBufferViewport, (short)obj,
                                      enhancedScreenX, enhancedScreenY);
+                    SdlShieldFlashDraw(&stSpaceBufferViewport, (short)obj,
+                                       enhancedScreenX, enhancedScreenY);
 #endif
                 }
                 break;

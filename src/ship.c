@@ -587,6 +587,10 @@ int inflict_damage(short attacker, short victim, short damage,
         quadrant = (dot_product(impactDirection,
             &aShipFwdVec[victim]) > 0);
         strength = &aasShipShield[victim][quadrant];
+#ifdef SDL_PORT
+        if (*strength > 0)
+            SdlShieldFlashStart(attacker, victim);
+#endif
         damage = (damage - *strength);
         if (damage > 0) {
             *strength = 0;
