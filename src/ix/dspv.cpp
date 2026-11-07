@@ -171,6 +171,22 @@ void ix_dspv_set_pan(int voice, unsigned short angle)
     }
 }
 
+#ifdef SDL_PORT
+void ix_dspv_set_spatial(int voice, int earDelay, int rearAmount)
+{
+    IxVoice *state;
+
+    if (voice < 0 || nVoiceCount <= voice)
+        return;
+    state = &aVoices[voice];
+    state->earDelay = (short)earDelay;
+    state->rearAmount = (short)rearAmount;
+    state->lowpassLeft = 0;
+    state->lowpassRight = 0;
+    ix_dspv_recalc_mix(voice);
+}
+#endif
+
 /* Function start: 0x446CB1 */   /* source line 131 */
 void ix_dspv_set_frequency(int voice, unsigned int hz)
 {
@@ -237,6 +253,13 @@ void ix_dspv_recalc_mix(int voice)
         (asPanGains[panPosition * 2] * scaledVolume >> 0x10);
     voiceState->rightGain =
         (asPanGains[panPosition * 2 + 1] * scaledVolume >> 0x10);
+#ifdef SDL_PORT
+    /* Sources behind the listener lose up to 2.5 dB. */
+    voiceState->leftGain = (short)(voiceState->leftGain *
+        (0x100 - voiceState->rearAmount * 75 / 0x100) >> 8);
+    voiceState->rightGain = (short)(voiceState->rightGain *
+        (0x100 - voiceState->rearAmount * 75 / 0x100) >> 8);
+#endif
     voiceState->leftGainHi = (voiceState->leftGain >> 8);
     voiceState->rightGainHi = (voiceState->rightGain >> 8);
     LeaveCriticalSection(&csMixer);
@@ -244,6 +267,38 @@ void ix_dspv_recalc_mix(int voice)
 
 /* Portable counterpart of the assembled sample mixer in dspmix.asm. */
 #ifdef SDL_PORT
+/* One channel of the voice's current frame, read delayFrames source frames
+   behind the cursor (wrapping inside a looping sample, silent before the
+   start of a one-shot one). */
+int ReadVoiceSample(const IxVoice *state, const unsigned char *cursor,
+                           int delayFrames, unsigned int bytesPerFrame,
+                           int is16, int channelOffset)
+{
+    const unsigned char *at;
+
+    at = cursor;
+    if (delayFrames != 0) {
+        ptrdiff_t behind = (ptrdiff_t)delayFrames * bytesPerFrame;
+
+        if (cursor - state->start >= behind) {
+            at = cursor - behind;
+        } else if ((state->flags & IX_VOICE_FLAG4) != 0 &&
+                   state->end - state->start >= behind) {
+            at = state->end - (behind - (cursor - state->start));
+        } else {
+            return 0;
+        }
+    }
+    at += channelOffset;
+    if (is16) {
+        short sample;
+
+        memcpy(&sample, at, sizeof(sample));
+        return sample;
+    }
+    return *(const signed char *)at;
+}
+
 void ix_dspv_mix(void *outputBuffer, unsigned int outputBytes)
 {
     short *output;
@@ -282,28 +337,44 @@ void ix_dspv_mix(void *outputBuffer, unsigned int outputBytes)
                     }
                     cursor = state->start;
                 }
-                if ((state->flags & IX_VOICE_16BIT) != 0) {
-                    short sampleLeft;
-                    short sampleRight;
+                {
+                    int is16 = (state->flags & IX_VOICE_16BIT) != 0;
+                    int isStereo = (state->flags & IX_VOICE_STEREO) != 0;
+                    int sampleBytes = is16 ? 2 : 1;
+                    int delayLeft = state->earDelay > 0 ? state->earDelay : 0;
+                    int delayRight = state->earDelay < 0 ? -state->earDelay : 0;
+                    int sampleLeft;
+                    int sampleRight;
 
-                    memcpy(&sampleLeft, cursor, sizeof(sampleLeft));
-                    if ((state->flags & IX_VOICE_STEREO) != 0)
-                        memcpy(&sampleRight, cursor + 2, sizeof(sampleRight));
-                    else
-                        sampleRight = sampleLeft;
-                    left = (sampleLeft * state->leftGain) >> 16;
-                    right = (sampleRight * state->rightGain) >> 16;
-                } else {
-                    signed char sampleLeft;
-                    signed char sampleRight;
+                    /* The far ear hears the same source frames a little
+                       later; delays are output frames, so convert them to
+                       source frames. */
+                    delayLeft = (delayLeft * state->rate) >> 8;
+                    delayRight = (delayRight * state->rate) >> 8;
+                    sampleLeft = ReadVoiceSample(
+                        state, cursor, delayLeft, bytesPerFrame, is16, 0);
+                    sampleRight = ReadVoiceSample(
+                        state, cursor, delayRight, bytesPerFrame, is16,
+                        isStereo ? sampleBytes : 0);
+                    if (is16) {
+                        left = (sampleLeft * state->leftGain) >> 16;
+                        right = (sampleRight * state->rightGain) >> 16;
+                    } else {
+                        left = sampleLeft * (signed char)state->leftGainHi;
+                        right = sampleRight * (signed char)state->rightGainHi;
+                    }
+                    if (state->rearAmount != 0) {
+                        /* One-pole low-pass, down to about 1.2 kHz when the
+                           source is directly behind. */
+                        int alpha = 0x100 - state->rearAmount * 166 / 0x100;
 
-                    sampleLeft = *(signed char *)cursor;
-                    if ((state->flags & IX_VOICE_STEREO) != 0)
-                        sampleRight = *(signed char *)(cursor + 1);
-                    else
-                        sampleRight = sampleLeft;
-                    left = sampleLeft * (signed char)state->leftGainHi;
-                    right = sampleRight * (signed char)state->rightGainHi;
+                        state->lowpassLeft +=
+                            (left - state->lowpassLeft) * alpha >> 8;
+                        state->lowpassRight +=
+                            (right - state->lowpassRight) * alpha >> 8;
+                        left = state->lowpassLeft;
+                        right = state->lowpassRight;
+                    }
                 }
                 mixed = output[frame * 2] + left;
                 if (mixed > 0x7fff)

@@ -26,6 +26,10 @@ void IxSound::ix_system_sound_init(IxSample *newSample,
     volume = 0xffff;
     pan = newPan;
     basePriority = newBasePriority;
+#ifdef SDL_PORT
+    earDelay = 0;
+    rearAmount = 0;
+#endif
     previous = 0;
     next = previous;
     stopTime = (unsigned int)-1;
@@ -78,6 +82,14 @@ void IxSound::ix_system_sound_set_pan(unsigned short newPan)
     flags |= IX_SOUND_PAN_DIRTY;
     pan = newPan;
 }
+
+#ifdef SDL_PORT
+void IxSound::ix_system_sound_set_spatial(int newEarDelay, int newRearAmount)
+{
+    earDelay = (short)newEarDelay;
+    rearAmount = (short)newRearAmount;
+}
+#endif
 
 /* Function start: 0x00447C44 */
 void IxSound::ix_system_sound_set_frequency(int newPitchOffset)

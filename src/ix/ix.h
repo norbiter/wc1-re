@@ -64,6 +64,11 @@ extern "C" void ix_dspv_mix(void *outputBuffer, unsigned int outputBytes); /* 0x
  * empty $E2/$E1 initializer pair for each global array, including its CRT
  * registration. An explicit constructor instead emits calls absent from the
  * original. The existing free functions retain access through friendship. */
+#ifdef SDL_PORT
+struct IxVoice;
+int ReadVoiceSample(const IxVoice *, const unsigned char *, int,
+                    unsigned int, int, int);
+#endif
 struct IxVoice {                  /* 32 bytes; offsets confirmed from the accessors */
 private:
     unsigned int   flags;         /* +0x00 */
@@ -79,6 +84,13 @@ private:
     short          rightGain;     /* +0x1A */
     short          panAngle;      /* +0x1C  0..0x7F, wraps at +-0x40 */
     short          panPos;        /* +0x1E  0..0xFF, indexes the pan table */
+#ifdef SDL_PORT
+    /* Fork additions: head-shadow cues layered on the level pan. */
+    short          earDelay;      /* output frames; >0 delays left, <0 right */
+    short          rearAmount;    /* 0 in front .. 0x100 directly behind */
+    int            lowpassLeft;
+    int            lowpassRight;
+#endif
 
     friend void ix_dspv_set_active(int);
     friend void ix_dspv_clear_active(int);
@@ -90,6 +102,11 @@ private:
     friend void ix_dspv_set_position(int, int);
     friend void ix_dspv_set_volume(int, short);
     friend void ix_dspv_set_pan(int, unsigned short);
+#ifdef SDL_PORT
+    friend void ix_dspv_set_spatial(int, int, int);
+    friend int ReadVoiceSample(const IxVoice *, const unsigned char *, int,
+                               unsigned int, int, int);
+#endif
     friend void ix_dspv_set_frequency(int, unsigned int);
     friend void ix_dspv_set_bits_per_sample(int, int);
     friend void ix_dspv_set_channels(int, int);
@@ -162,6 +179,10 @@ struct IxSound {
     unsigned short volume;        /* +0x1C */
     unsigned short pan;           /* +0x1E */
     unsigned char basePriority;   /* +0x20 */
+#ifdef SDL_PORT
+    short earDelay;
+    short rearAmount;
+#endif
     IxSound *previous;            /* +0x24 */
     IxSound *next;                /* +0x28 */
 
@@ -175,6 +196,9 @@ struct IxSound {
     void ix_system_sound_construct_centred(IxSample *newSample);
     void ix_system_sound_set_volume(unsigned short newVolume);
     void ix_system_sound_set_pan(unsigned short newPan);
+#ifdef SDL_PORT
+    void ix_system_sound_set_spatial(int newEarDelay, int newRearAmount);
+#endif
     void ix_system_sound_set_frequency(int newPitchOffset);
     void ix_system_sound_set_priority(unsigned char newBasePriority);
     void ix_sound_reprioritise(void);
@@ -217,6 +241,9 @@ int  ix_dspv_get_position(int voice);            /* 0x00446A2B  cursor - start *
 void ix_dspv_set_position(int voice, int off);   /* 0x00446AA0  cursor = start + off */
 void ix_dspv_set_volume(int voice, short vol);   /* 0x00446B18 */
 void ix_dspv_set_pan(int voice, unsigned short a); /* 0x00446B8C */
+#ifdef SDL_PORT
+void ix_dspv_set_spatial(int voice, int earDelay, int rearAmount);
+#endif
 void ix_dspv_set_frequency(int voice, unsigned int hz);        /* 0x00446CB1 */
 void ix_dspv_set_bits_per_sample(int voice, int bps);          /* 0x00446D2C  8 or 16 */
 void ix_dspv_set_channels(int voice, int ch);                  /* 0x00446DF5  1 or 2 */

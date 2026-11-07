@@ -270,6 +270,9 @@ void ix_system_assign_voice(IxSound *sound, int voice)
     ix_dspv_set_bits_per_sample(voice, sample->bitsPerSample);
     ix_dspv_set_frequency(voice, sample->frequency + sound->pitchOffset);
     ix_dspv_set_pan(voice, sound->pan);
+#ifdef SDL_PORT
+    ix_dspv_set_spatial(voice, sound->earDelay, sound->rearAmount);
+#endif
     ix_dspv_set_volume(voice, sound->volume);
     ix_dspv_set_active(voice);
     sound->voice = voice;

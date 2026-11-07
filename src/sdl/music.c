@@ -17,6 +17,13 @@
 #define SDL_SOUND_AUDIBLE_VOLUME 10
 #define SDL_SOUND_CENTRE_PAN 64
 #define SDL_WAVE_FULL_VOLUME 32000
+/* Sideways offsets are exaggerated by 3/2 (saturating) so a source 40 degrees
+   off the nose is already panned hard. */
+#define SDL_SOUND_PAN_GAIN_NUMERATOR 3
+#define SDL_SOUND_PAN_GAIN_DENOMINATOR 2
+/* Far-ear delay at 22050 Hz: 11 frames is 0.5 ms, a little under the 0.65 ms
+   of a real head, which keeps speaker listening from combing. */
+#define SDL_SOUND_MAX_EAR_DELAY_FRAMES 11
 
 static CRITICAL_SECTION g_stSdlDosMusicAudioCriticalSection;
 static SDL_mutex *g_pSdlDosMusicMutex;
@@ -378,11 +385,17 @@ int SdlHandlesGameSoundEffects(void)
  * the view's centre. */
 int SdlSoundEffectPan(const FixedVector *direction)
 {
+    int stereoOffset;
     int scaledPan;
     int pan;
 
-    scaledPan = dot_product(direction, &aShipRightVector[EYE_OBJECT]) *
-        SDL_SOUND_CENTRE_PAN;
+    stereoOffset = dot_product(direction, &aShipRightVector[EYE_OBJECT]) *
+        SDL_SOUND_PAN_GAIN_NUMERATOR / SDL_SOUND_PAN_GAIN_DENOMINATOR;
+    if (stereoOffset < -0x100)
+        stereoOffset = -0x100;
+    else if (stereoOffset > 0x100)
+        stereoOffset = 0x100;
+    scaledPan = stereoOffset * SDL_SOUND_CENTRE_PAN;
     if (scaledPan < 0)
         scaledPan = -((-scaledPan + 0xff) / 0x100);
     else
@@ -399,6 +412,9 @@ int SdlPlayGameSoundEffect(int soundNumber, int sourceObject, int looping)
 {
     FixedVector delta;
     long magnitude;
+    int stereoOffset;
+    int rearAmount;
+    int earDelay;
     int distance;
     int volume;
     int pan;
@@ -408,6 +424,8 @@ int SdlPlayGameSoundEffect(int soundNumber, int sourceObject, int looping)
 
     magnitude = 0;
     pan = SDL_SOUND_CENTRE_PAN;
+    rearAmount = 0;
+    earDelay = 0;
     if (sourceObject != -1) {
         if (sourceObject < 0 || sourceObject >= SPACE_OBJECT_COUNT)
             return 0;
@@ -417,6 +435,17 @@ int SdlPlayGameSoundEffect(int soundNumber, int sourceObject, int looping)
         magnitude = Vector_magnitude(&delta);
         NormalizeFixedVector(&delta);
         pan = SdlSoundEffectPan(&delta);
+        stereoOffset = dot_product(
+            &delta, &aShipRightVector[EYE_OBJECT]);
+        /* A source in front of the ship is 0, one behind it up to 0x100. */
+        rearAmount = -dot_product(
+            &delta, &aShipFwdVec[EYE_OBJECT]);
+        if (rearAmount < 0)
+            rearAmount = 0;
+        else if (rearAmount > 0x100)
+            rearAmount = 0x100;
+        /* A positive offset is a source to the right: delay the left ear. */
+        earDelay = stereoOffset * SDL_SOUND_MAX_EAR_DELAY_FRAMES / 0x100;
     }
 
     volume = SDL_SOUND_FULL_VOLUME;
@@ -453,7 +482,8 @@ int SdlPlayGameSoundEffect(int soundNumber, int sourceObject, int looping)
     if (sourceObject != -1)
         aiSoundEffectSourceActiveArray[sourceObject] = 1;
     sprintf(szSfxWavePath, "sfx%02i.wav", soundNumber - 1);
-    SdlPlayWaveWithPan(szSfxWavePath, looping, distance, pan);
+    SdlPlayWaveWithPan(szSfxWavePath, looping, distance, pan,
+                       earDelay, rearAmount);
     return 1;
 }
 

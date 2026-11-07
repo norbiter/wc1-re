@@ -6,22 +6,30 @@
 
 static unsigned short g_nSdlPendingWavePan;
 static int g_nSdlPendingWavePanDepth;
+static int g_nSdlPendingWaveEarDelay;
+static int g_nSdlPendingWaveRearAmount;
 
 extern "C" IxSound *SdlNewWaveSound(IxSample *sample)
 {
     IxSound *sound;
 
     sound = ix_system_new_sound(sample);
-    if (sound != 0 && g_nSdlPendingWavePanDepth != 0)
+    if (sound != 0 && g_nSdlPendingWavePanDepth != 0) {
         sound->ix_system_sound_set_pan(g_nSdlPendingWavePan);
+        sound->ix_system_sound_set_spatial(
+            g_nSdlPendingWaveEarDelay, g_nSdlPendingWaveRearAmount);
+    }
     return sound;
 }
 
 extern "C" void SdlPlayWaveWithPan(
-    const char *filename, int looping, int volume, int pan)
+    const char *filename, int looping, int volume, int pan,
+    int earDelay, int rearAmount)
 {
     unsigned short previousPan;
     int previousDepth;
+    int previousEarDelay;
+    int previousRearAmount;
 
     if (pan < 0)
         pan = 0;
@@ -29,6 +37,10 @@ extern "C" void SdlPlayWaveWithPan(
         pan = SDL_WAVE_MAXIMUM_PAN;
     previousPan = g_nSdlPendingWavePan;
     previousDepth = g_nSdlPendingWavePanDepth;
+    previousEarDelay = g_nSdlPendingWaveEarDelay;
+    previousRearAmount = g_nSdlPendingWaveRearAmount;
+    g_nSdlPendingWaveEarDelay = earDelay;
+    g_nSdlPendingWaveRearAmount = rearAmount;
     g_nSdlPendingWavePan = (unsigned short)(
         (SDL_WAVE_CENTRE_PAN - pan) * 0x100);
     g_nSdlPendingWavePanDepth++;
@@ -38,5 +50,7 @@ extern "C" void SdlPlayWaveWithPan(
     playWAVE(filename, looping,
              volume / SDL_WAVE_SOUND_EFFECT_GAIN_DIVISOR);
     g_nSdlPendingWavePanDepth = previousDepth;
+    g_nSdlPendingWaveEarDelay = previousEarDelay;
+    g_nSdlPendingWaveRearAmount = previousRearAmount;
     g_nSdlPendingWavePan = previousPan;
 }

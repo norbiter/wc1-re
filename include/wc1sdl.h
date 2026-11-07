@@ -576,7 +576,7 @@ int SdlSoundEffectPan(const struct FixedVector *direction);
 int SdlPlayGameSoundEffect(int soundNumber, int sourceObject,
                            int looping);
 void SdlPlayWaveWithPan(const char *filename, int looping,
-                        int volume, int pan);
+                        int volume, int pan, int earDelay, int rearAmount);
 void SdlServiceOriginFxMusic(void);
 /* The music the player chose: the installation's own (Kilrathi Saga
  * streams, or DOS AdLib), or the DOS scores on an AdLib or an MT-32. */
