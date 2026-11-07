@@ -13,7 +13,9 @@
 #define MOUSE_CURVE_MAX_STEP 8
 /* Offsets (logical 320x200 pixels) that give full deflection at S = 1. */
 #define MOUSE_CURVE_YAW_RANGE 80.0f
-#define MOUSE_CURVE_PITCH_RANGE 50.0f
+/* Logical pixels are 1.2 times taller than wide on the 4:3 display, so this
+ * gives pitch and yaw the same physical mouse travel. */
+#define MOUSE_CURVE_PITCH_RANGE (MOUSE_CURVE_YAW_RANGE / 1.2f)
 /* Share of the curve that is exponential, and how sharply it bends. */
 #define MOUSE_CURVE_EXP_SHARE 0.7f
 #define MOUSE_CURVE_EXP_BEND 3.0f
