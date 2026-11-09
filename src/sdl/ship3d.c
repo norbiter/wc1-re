@@ -14,14 +14,11 @@
  * rotation, so no mirroring is involved.
  *
  * Relighting follows ship3d/README.md.  The sprites were shaded by a
- * headlight, and the delighting fitted that shading per hue bank, so
- *
- *     lum = albedo + b[bank] * (clip(n.L, 0, 1) - c)
- *
- * gives the brightness under any light L, and the point is drawn with the
- * palette index of that brightness inside its hue bank.  The result is a
- * palette index, not RGB, so the game's own palette fades act on ships as
- * they do on sprites.
+ * headlight, and the delighting fitted that shading so that a point's colour
+ * under any light L depends only on clip(n.L, 0, 1).  The sidecar holds that
+ * dependence as each point's palette index at evenly spaced values of n.L,
+ * whichever colour model made it.  The result is a palette index, not RGB,
+ * so the game's own palette fades act on ships as they do on sprites.
  *
  * Points are splatted into the 8-bit space buffer with a per-ship depth
  * buffer. */
@@ -43,8 +40,7 @@
  * models) for about 7% more silhouette area. */
 #define SHIP3D_FOOTPRINT 1.5f
 
-#define SHIP3D_BANK_COUNT 16
-#define SHIP3D_LUT_SIZE 1024 /* brightness in quarter units, 0..255.75 */
+#define SHIP3D_MAX_SHADE_STEPS 1024
 
 typedef struct Ship3dPoint {
     float x;
@@ -53,21 +49,15 @@ typedef struct Ship3dPoint {
     float nx;
     float ny;
     float nz;
-    float albedo;
-    signed char bank;           /* hue bank; -1 = grey fill, never shaded */
-    unsigned char fixedIndex;   /* palette index used when bank == -1 */
 } Ship3dPoint;
 
 typedef struct Ship3dModel {
     Ship3dPoint *points;
     int count;
     int tried;
-    float reference;            /* c: n.v at which a point shows its albedo */
-    float slope[SHIP3D_BANK_COUNT]; /* b: brightness per unit n.v, per bank */
-    unsigned char lut[SHIP3D_BANK_COUNT][SHIP3D_LUT_SIZE];
-    /* lut smoothed for the GL layer: palette index below, the next ramp
-     * entry above, and how far (0..255) the brightness is between them. */
-    unsigned char ramp[SHIP3D_BANK_COUNT][SHIP3D_LUT_SIZE][3];
+    int steps;
+    /* shade[point * steps + step]: palette index at n.L = step / (steps - 1) */
+    unsigned char *shade;
 } Ship3dModel;
 
 static char g_szShip3dDirectory[1024];
@@ -147,79 +137,88 @@ static float ReadShip3dFloat(const unsigned char *at)
     return value;
 }
 
-/* The lut picks the nearest palette entry, so it is a staircase.  Each run
- * of equal entries stands for one ramp colour at the run's centre; between
- * two centres the GL layer blends the two palette entries.  The end runs
- * reach to the ends of the table, so their centres are pulled in to a
- * neighbour's width from the boundary. */
-static void BuildShip3dRamp(Ship3dModel *model)
+/* The extent [*start, *end] of the run of equal entries holding step. */
+static void GetShip3dRun(const unsigned char *shade, int steps, int step,
+                         int *start, int *end)
 {
-    int bank;
-
-    for (bank = 0; bank < SHIP3D_BANK_COUNT; bank++) {
-        const unsigned char *lut = model->lut[bank];
-        float centre[SHIP3D_LUT_SIZE];
-        float width[SHIP3D_LUT_SIZE];
-        unsigned char entry[SHIP3D_LUT_SIZE];
-        int runs = 0;
-        int start = 0;
-        int step;
-        int run;
-
-        while (start < SHIP3D_LUT_SIZE) {
-            int end = start;
-
-            while (end + 1 < SHIP3D_LUT_SIZE && lut[end + 1] == lut[start])
-                end++;
-            entry[runs] = lut[start];
-            centre[runs] = (float)(start + end) * 0.5f;
-            width[runs] = (float)(end - start + 1);
-            runs++;
-            start = end + 1;
-        }
-        if (runs >= 2) {
-            float boundary = centre[0] + width[0] * 0.5f;
-            float pulled = boundary - width[1] * 0.5f;
-
-            if (pulled > centre[0])
-                centre[0] = pulled;
-            boundary = centre[runs - 1] - width[runs - 1] * 0.5f;
-            pulled = boundary + width[runs - 2] * 0.5f;
-            if (pulled < centre[runs - 1])
-                centre[runs - 1] = pulled;
-            for (run = 1; run < runs; run++)
-                if (centre[run] <= centre[run - 1])
-                    centre[run] = centre[run - 1] + 0.01f;
-        }
-        run = 0;
-        for (step = 0; step < SHIP3D_LUT_SIZE; step++) {
-            unsigned char *out = model->ramp[bank][step];
-            float fraction = 0.0f;
-            int next;
-
-            while (run + 1 < runs && (float)step >= centre[run + 1])
-                run++;
-            next = run + 1 < runs ? run + 1 : run;
-            if (next != run && (float)step > centre[run])
-                fraction = ((float)step - centre[run]) /
-                           (centre[next] - centre[run]);
-            out[0] = entry[run];
-            out[1] = entry[next];
-            out[2] = (unsigned char)(fraction * 255.0f + 0.5f);
-        }
-    }
+    *start = step;
+    while (*start > 0 && shade[*start - 1] == shade[step])
+        (*start)--;
+    *end = step;
+    while (*end + 1 < steps && shade[*end + 1] == shade[step])
+        (*end)++;
 }
 
-/* Fills the relighting fields from the .light sidecar. */
+/* Each run of equal entries stands for one colour at the run's centre.  A
+ * run at an end of the table is cut off by n.L reaching 0 or 1, so its
+ * centre is pulled in to a neighbour's width from its inner boundary. */
+static float GetShip3dRunCentre(const unsigned char *shade, int steps,
+                                int start, int end)
+{
+    float centre = (float)(start + end) * 0.5f;
+    int otherStart;
+    int otherEnd;
+    float pulled;
+
+    if (start == 0 && end + 1 < steps) {
+        GetShip3dRun(shade, steps, end + 1, &otherStart, &otherEnd);
+        pulled = (float)end + 0.5f - (float)(otherEnd - otherStart + 1) * 0.5f;
+        if (pulled > centre)
+            centre = pulled;
+    } else if (end == steps - 1 && start > 0) {
+        GetShip3dRun(shade, steps, start - 1, &otherStart, &otherEnd);
+        pulled = (float)start - 0.5f + (float)(otherEnd - otherStart + 1) * 0.5f;
+        if (pulled < centre)
+            centre = pulled;
+    }
+    return centre;
+}
+
+/* The shade table is a staircase in n.L.  For the GL layer, between the
+ * centres of two neighbouring runs blend their palette entries: out gets the
+ * entry below, the entry above and how far (0..1) position is between them. */
+static void GetShip3dBlend(const unsigned char *shade, int steps,
+                           float position, float out[3])
+{
+    int step = (int)(position + 0.5f);
+    int start;
+    int end;
+    int otherStart;
+    int otherEnd;
+    float centre;
+    float otherCentre;
+
+    GetShip3dRun(shade, steps, step, &start, &end);
+    centre = GetShip3dRunCentre(shade, steps, start, end);
+    out[0] = (float)shade[step];
+    out[1] = out[0];
+    out[2] = 0.0f;
+    if (position > centre && end + 1 < steps) {
+        GetShip3dRun(shade, steps, end + 1, &otherStart, &otherEnd);
+        otherCentre = GetShip3dRunCentre(shade, steps, otherStart, otherEnd);
+        out[1] = (float)shade[end + 1];
+        out[2] = (position - centre) / (otherCentre - centre);
+    } else if (position < centre && start > 0) {
+        GetShip3dRun(shade, steps, start - 1, &otherStart, &otherEnd);
+        otherCentre = GetShip3dRunCentre(shade, steps, otherStart, otherEnd);
+        out[0] = (float)shade[start - 1];
+        out[1] = (float)shade[step];
+        out[2] = (position - otherCentre) / (centre - otherCentre);
+    }
+    if (out[2] < 0.0f)
+        out[2] = 0.0f;
+    else if (out[2] > 1.0f)
+        out[2] = 1.0f;
+}
+
+/* Fills the shade tables from the .light sidecar. */
 static int LoadShip3dLight(Ship3dModel *model, const char *plyPath)
 {
     char path[1200];
     unsigned char *data;
     size_t size;
     size_t length;
-    size_t offset;
-    int bank;
-    int index;
+    unsigned int steps;
 
     length = SDL_strlen(plyPath);
     if (length < 4 || length >= sizeof(path))
@@ -233,33 +232,26 @@ static int LoadShip3dLight(Ship3dModel *model, const char *plyPath)
                 path);
         return 0;
     }
-    offset = 4 + 4 + 4 + 4 + 4 * SHIP3D_BANK_COUNT +
-             (size_t)SHIP3D_BANK_COUNT * SHIP3D_LUT_SIZE;
-    if (size < offset || SDL_memcmp(data, "S3DL", 4) != 0 ||
-        ReadShip3dWord(data + 4) != 1 ||
+    steps = size >= 16 ? ReadShip3dWord(data + 12) : 0;
+    if (size < 16 || SDL_memcmp(data, "S3DL", 4) != 0 ||
+        ReadShip3dWord(data + 4) != 2 ||
         ReadShip3dWord(data + 8) != (unsigned int)model->count ||
-        size != offset + (size_t)model->count * 6) {
-        fprintf(stderr, "ship3d: %s does not match its model\n", path);
+        steps < 2 || steps > SHIP3D_MAX_SHADE_STEPS ||
+        size != 16 + (size_t)model->count * steps) {
+        fprintf(stderr,
+                "ship3d: %s does not match its model; rerun "
+                "bin/ship3dLight.py\n",
+                path);
         SDL_free(data);
         return 0;
     }
-    model->reference = ReadShip3dFloat(data + 12);
-    for (bank = 0; bank < SHIP3D_BANK_COUNT; bank++)
-        model->slope[bank] = ReadShip3dFloat(data + 16 + 4 * bank);
-    offset = 16 + 4 * SHIP3D_BANK_COUNT;
-    SDL_memcpy(model->lut, data + offset, sizeof(model->lut));
-    offset += sizeof(model->lut);
-    BuildShip3dRamp(model);
-    for (index = 0; index < model->count; index++) {
-        Ship3dPoint *point = &model->points[index];
-
-        point->bank = (signed char)data[offset + index];
-        point->fixedIndex = data[offset + model->count + index];
-        point->albedo = ReadShip3dFloat(
-            data + offset + (size_t)model->count * 2 + (size_t)index * 4);
-        if (point->bank >= SHIP3D_BANK_COUNT)
-            point->bank = -1;
+    model->shade = SDL_malloc((size_t)model->count * steps);
+    if (model->shade == NULL) {
+        SDL_free(data);
+        return 0;
     }
+    SDL_memcpy(model->shade, data + 16, (size_t)model->count * steps);
+    model->steps = (int)steps;
     SDL_free(data);
     return 1;
 }
@@ -526,33 +518,19 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
                 depth = cameraZ * scale * (1.0f / 8192.0f);
                 out[2] = depth < -0.99f ? -0.99f :
                          depth > 0.99f ? 0.99f : depth;
-                if (point->bank < 0) {
-                    out[3] = (float)point->fixedIndex;
-                    out[4] = (float)point->fixedIndex;
-                    out[5] = 0.0f;
-                } else {
+                {
                     float facing = normalX * lightX + normalY * lightY +
                                    normalZ * lightZ;
-                    float brightness;
-                    int step;
-                    const unsigned char *ramp;
 
                     if (facing < 0.0f)
                         facing = 0.0f;
                     else if (facing > 1.0f)
                         facing = 1.0f;
-                    brightness = point->albedo +
-                                 model->slope[point->bank] *
-                                     (facing - model->reference);
-                    step = (int)(brightness * 4.0f + 0.5f);
-                    if (step < 0)
-                        step = 0;
-                    else if (step >= SHIP3D_LUT_SIZE)
-                        step = SHIP3D_LUT_SIZE - 1;
-                    ramp = model->ramp[point->bank][step];
-                    out[3] = (float)ramp[0];
-                    out[4] = (float)ramp[1];
-                    out[5] = (float)ramp[2] * (1.0f / 255.0f);
+                    GetShip3dBlend(model->shade +
+                                       (size_t)index * model->steps,
+                                   model->steps,
+                                   facing * (float)(model->steps - 1),
+                                   out + 3);
                 }
                 pointCount++;
             }
@@ -630,8 +608,6 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
         float normalZ = basis[2][0] * point->nx + basis[2][1] * point->ny +
                         basis[2][2] * point->nz;
         float facing;
-        float brightness;
-        int step;
         unsigned char colour;
         int firstX;
         int lastX;
@@ -643,24 +619,14 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
         /* Facing away from the viewer: let the front surface win. */
         if (normalZ > 0.35f)
             continue;
-        if (point->bank < 0) {
-            colour = point->fixedIndex;
-        } else {
-            facing = normalX * lightX + normalY * lightY + normalZ * lightZ;
-            if (facing < 0.0f)
-                facing = 0.0f;
-            else if (facing > 1.0f)
-                facing = 1.0f;
-            brightness = point->albedo +
-                         model->slope[point->bank] *
-                             (facing - model->reference);
-            step = (int)(brightness * 4.0f + 0.5f);
-            if (step < 0)
-                step = 0;
-            else if (step >= SHIP3D_LUT_SIZE)
-                step = SHIP3D_LUT_SIZE - 1;
-            colour = model->lut[point->bank][step];
-        }
+        facing = normalX * lightX + normalY * lightY + normalZ * lightZ;
+        if (facing < 0.0f)
+            facing = 0.0f;
+        else if (facing > 1.0f)
+            facing = 1.0f;
+        colour = model->shade[(size_t)index * model->steps +
+                              (int)(facing * (float)(model->steps - 1) +
+                                    0.5f)];
         GetShip3dSpan(centerX + cameraX * scale - viewLeft, halfWidth,
                       &firstX, &lastX);
         GetShip3dSpan(centerY + cameraY * scale - viewTop, halfHeight,
@@ -687,6 +653,7 @@ void SdlShip3dShutdown(void)
 
     for (type = 0; type < SHIP3D_TYPE_COUNT; type++) {
         SDL_free(g_aShip3dModels[type].points);
+        SDL_free(g_aShip3dModels[type].shade);
         SDL_zero(g_aShip3dModels[type]);
     }
     SDL_free(g_pfShip3dDepth);
