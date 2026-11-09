@@ -1356,9 +1356,20 @@ short LocateMobileObjective(short objective)
     short ship = -1;
 
     if (mobile_objective(objective) != 0) {
+#ifdef SDL_PORT
+        /* The original returned locate_ship's found/not-found flag (0 or 1)
+         * here, so check_sighting tested whether object slot 1 (normally the
+         * wingman) was on screen instead of the objective ship.  Without a
+         * visible wingman, ship objectives such as the Fralthi in 8-2 were
+         * never sighted.  Return the objective ship's object slot. */
+        if (locate_ship(aMissionObjectivesArray[objective].index,
+                        &aMissionObjectivesArray[objective].position) != 0)
+            ship = find_ship_index(aMissionObjectivesArray[objective].index);
+#else
         ship = locate_ship(
             aMissionObjectivesArray[objective].index,
             &aMissionObjectivesArray[objective].position);
+#endif
     }
     return ship;
 }
@@ -1502,7 +1513,14 @@ void update_objective_location(short objective)
                        &delta);
     range = FixedToShortSaturating(
         Vector_magnitude(&delta));
+#ifdef SDL_PORT
+    /* A mobile objective is sighted only while its ship is spawned in
+     * space; -1 would make check_sighting accept range alone. */
+    if (mobile_objective(objective) == 0 || object != -1)
+        check_sighting(objective, range, object);
+#else
     check_sighting(objective, range, object);
+#endif
     if (mobile_objective(objective) != 0) {
         if (object != -1)
             check_visit(objective, range);
