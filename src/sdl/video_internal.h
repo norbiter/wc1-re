@@ -20,7 +20,7 @@ int SdlEgaDitherEnabled(void);
 int SdlShip3dUsesGl(void);
 int SdlGlRendererRecordShip(const struct Viewport *viewport,
                                const float *points, int count,
-                               float footprintHalfExtent);
+                               float footprintHalfExtent, int trueColour);
 int SdlGlRendererRecordShipOverlay(const struct Viewport *viewport,
                                    const float *vertices, int count,
                                    const float colour[3]);

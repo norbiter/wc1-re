@@ -20,6 +20,23 @@
  * whichever colour model made it.  The result is a palette index, not RGB,
  * so the game's own palette fades act on ships as they do on sprites.
  *
+ * Two extra terms add detail the sprites never had.  Ambient occlusion is
+ * worked out once per model from the hull's distance field (hullfield.c):
+ * short probes over the hemisphere around each point's normal find how much
+ * of it the hull itself closes off.  In the GL layer it scales the point's
+ * colour; in the 8-bit frame it scales the point's place on its ramp.  Edge
+ * lighting is a rim light from camera-space (+1, +1, +1), behind the ship to
+ * the lower right, on surfaces turned edge-on to the viewer.  It moves the
+ * point up its own ramp, so it stays in the ship's colours and still follows
+ * palette fades.  A Fresnel term does the same, from no particular light,
+ * on surfaces seen almost exactly edge-on, which outlines the hull faintly.
+ *
+ * With --ship3d-truecolour the GL layer skips the palette: a version 3
+ * sidecar also holds the quantised-RGB model itself, each point's albedo and
+ * the ship's kappa and c, and the point is drawn as
+ * albedo * max(1 + kappa * (n.L - c), 0.05) without snapping to the nearest
+ * palette entry.  Those colours do not follow palette fades.
+ *
  * Points are splatted into the 8-bit space buffer with a per-ship depth
  * buffer. */
 #include "wc1.h"
@@ -42,6 +59,25 @@
 
 #define SHIP3D_MAX_SHADE_STEPS 1024
 
+/* Ambient occlusion: probe distances along each direction, in hull-field
+ * cells, and how much of the light a fully occluded point loses. */
+#define SHIP3D_AO_DIRECTIONS 9
+#define SHIP3D_AO_PROBES 4
+#define SHIP3D_AO_STRENGTH 0.55f
+
+/* Edge lighting: the rim light's reach up the shade ramp and how tightly it
+ * hugs the silhouette. */
+#define SHIP3D_RIM_STRENGTH 0.6f
+#define SHIP3D_RIM_POWER 2.0f
+
+/* Fresnel outline: Schlick's (1 - n.v)^5 with no reflectance head-on, scaled
+ * to how far up the shade ramp it can move a point seen edge-on. */
+#define SHIP3D_FRESNEL_STRENGTH 0.35f
+
+/* Floats per point handed to the GL layer: x, y, depth, low and high palette
+ * entries, blend, brightness. */
+#define SHIP3D_GL_POINT_FLOATS 7
+
 typedef struct Ship3dPoint {
     float x;
     float y;
@@ -58,10 +94,22 @@ typedef struct Ship3dModel {
     int steps;
     /* shade[point * steps + step]: palette index at n.L = step / (steps - 1) */
     unsigned char *shade;
+    /* Version 3 sidecars: albedo[point * 3 + channel], RGB 0..1, and the
+     * shading strength and reference n.L of the quantised-RGB model.
+     * unlit[point] is nonzero where no sprite saw the point; its albedo is
+     * then its stored colour, drawn under any light. */
+    float *albedo;
+    unsigned char *unlit;
+    float kappa;
+    float reference;
+    /* occlusion[point]: brightness 0..1 left by ambient occlusion */
+    float *occlusion;
+    int occlusionTried;
 } Ship3dModel;
 
 static char g_szShip3dDirectory[1024];
 static int g_bShip3dEnabled;
+static int g_bShip3dTrueColour;
 static Ship3dModel g_aShip3dModels[SHIP3D_TYPE_COUNT];
 static float *g_pfShip3dDepth;
 static int g_nShip3dDepthPixels;
@@ -85,6 +133,11 @@ void SdlShip3dEnable(const char *directory)
 int SdlShip3dEnabled(void)
 {
     return g_bShip3dEnabled;
+}
+
+void SdlShip3dEnableTrueColour(void)
+{
+    g_bShip3dTrueColour = 1;
 }
 
 /* With the GL renderer the ships are drawn at output resolution in the
@@ -211,13 +264,19 @@ static void GetShip3dBlend(const unsigned char *shade, int steps,
         out[2] = 1.0f;
 }
 
-/* Fills the shade tables from the .light sidecar. */
-static int LoadShip3dLight(Ship3dModel *model, const char *plyPath)
+/* Fills the shade tables, and from a version 3 sidecar the albedo, from the
+ * .light sidecar.  plyColours holds each point's stored colour, at the PLY
+ * record stride. */
+static int LoadShip3dLight(Ship3dModel *model, const char *plyPath,
+                           const unsigned char *plyColours)
 {
     char path[1200];
     unsigned char *data;
     size_t size;
     size_t length;
+    size_t header;
+    size_t expected;
+    unsigned int version;
     unsigned int steps;
 
     length = SDL_strlen(plyPath);
@@ -232,12 +291,16 @@ static int LoadShip3dLight(Ship3dModel *model, const char *plyPath)
                 path);
         return 0;
     }
+    version = size >= 16 ? ReadShip3dWord(data + 4) : 0;
     steps = size >= 16 ? ReadShip3dWord(data + 12) : 0;
+    header = version == 3 ? 24 : 16;
+    expected = header + (size_t)model->count * steps;
+    if (version == 3)
+        expected += (size_t)model->count * 3 * sizeof(float);
     if (size < 16 || SDL_memcmp(data, "S3DL", 4) != 0 ||
-        ReadShip3dWord(data + 4) != 2 ||
+        (version != 2 && version != 3) ||
         ReadShip3dWord(data + 8) != (unsigned int)model->count ||
-        steps < 2 || steps > SHIP3D_MAX_SHADE_STEPS ||
-        size != 16 + (size_t)model->count * steps) {
+        steps < 2 || steps > SHIP3D_MAX_SHADE_STEPS || size != expected) {
         fprintf(stderr,
                 "ship3d: %s does not match its model; rerun "
                 "bin/ship3dLight.py\n",
@@ -250,10 +313,179 @@ static int LoadShip3dLight(Ship3dModel *model, const char *plyPath)
         SDL_free(data);
         return 0;
     }
-    SDL_memcpy(model->shade, data + 16, (size_t)model->count * steps);
+    SDL_memcpy(model->shade, data + header, (size_t)model->count * steps);
     model->steps = (int)steps;
+    if (version == 3) {
+        const unsigned char *albedo =
+            data + header + (size_t)model->count * steps;
+        int index;
+
+        model->kappa = ReadShip3dFloat(data + 16);
+        model->reference = ReadShip3dFloat(data + 20);
+        model->albedo = SDL_malloc((size_t)model->count * 3 * sizeof(float));
+        model->unlit = SDL_calloc((size_t)model->count, 1);
+        if (model->albedo == NULL || model->unlit == NULL) {
+            SDL_free(model->albedo);
+            SDL_free(model->unlit);
+            model->albedo = NULL;
+            model->unlit = NULL;
+        }
+        for (index = 0; model->albedo != NULL && index < model->count;
+             index++) {
+            const unsigned char *stored =
+                plyColours + (size_t)index * SHIP3D_PLY_STRIDE;
+            float *out = model->albedo + (size_t)index * 3;
+            int channel;
+
+            if (ReadShip3dFloat(albedo + (size_t)index * 12) < 0.0f) {
+                model->unlit[index] = 1;
+                for (channel = 0; channel < 3; channel++)
+                    out[channel] = (float)stored[channel] / 255.0f;
+                continue;
+            }
+            for (channel = 0; channel < 3; channel++)
+                out[channel] = ReadShip3dFloat(
+                    albedo + (size_t)index * 12 + (size_t)channel * 4) /
+                    255.0f;
+        }
+    }
     SDL_free(data);
     return 1;
+}
+
+/* Fraction (0..1) of the hemisphere above point (x, y, z) with unit normal n
+ * that the hull closes off.  Each probe compares the distance to the hull
+ * with what a flat surface would leave free there. */
+static float MeasureShip3dOcclusion(const HullField *field, float cell,
+                                    const float *point, const float *normal)
+{
+    static const float probeCells[SHIP3D_AO_PROBES] = {
+        1.5f, 3.0f, 6.0f, 12.0f
+    };
+    static const float probeWeight[SHIP3D_AO_PROBES] = {
+        1.0f, 0.8f, 0.6f, 0.4f
+    };
+    float tangent[3];
+    float bitangent[3];
+    float length;
+    float occlusion = 0.0f;
+    float total = 0.0f;
+    int direction;
+
+    /* Any unit vector at right angles to the normal, then a third. */
+    if (SDL_fabsf(normal[0]) < 0.9f) {
+        tangent[0] = 0.0f;
+        tangent[1] = normal[2];
+        tangent[2] = -normal[1];
+    } else {
+        tangent[0] = -normal[2];
+        tangent[1] = 0.0f;
+        tangent[2] = normal[0];
+    }
+    length = SDL_sqrtf(tangent[0] * tangent[0] + tangent[1] * tangent[1] +
+                       tangent[2] * tangent[2]);
+    if (length <= 0.0f)
+        return 0.0f;
+    tangent[0] /= length;
+    tangent[1] /= length;
+    tangent[2] /= length;
+    bitangent[0] = normal[1] * tangent[2] - normal[2] * tangent[1];
+    bitangent[1] = normal[2] * tangent[0] - normal[0] * tangent[2];
+    bitangent[2] = normal[0] * tangent[1] - normal[1] * tangent[0];
+
+    /* The normal, then eight directions 50 degrees off it. */
+    for (direction = 0; direction < SHIP3D_AO_DIRECTIONS; direction++) {
+        float along = direction == 0 ? 1.0f : 0.643f;
+        float across = direction == 0 ? 0.0f : 0.766f;
+        float angle = (float)direction * (2.0f * 3.14159265f / 8.0f);
+        float cosine = SDL_cosf(angle) * across;
+        float sine = SDL_sinf(angle) * across;
+        float ray[3];
+        int probe;
+
+        ray[0] = normal[0] * along + tangent[0] * cosine + bitangent[0] * sine;
+        ray[1] = normal[1] * along + tangent[1] * cosine + bitangent[1] * sine;
+        ray[2] = normal[2] * along + tangent[2] * cosine + bitangent[2] * sine;
+        for (probe = 0; probe < SHIP3D_AO_PROBES; probe++) {
+            float reach = probeCells[probe] * cell;
+            /* Start from the surface, half a voxel out from the centre. */
+            float distance = SdlSampleHullField(
+                field, point[0] + normal[0] * 0.5f + ray[0] * reach,
+                point[1] + normal[1] * 0.5f + ray[1] * reach,
+                point[2] + normal[2] * 0.5f + ray[2] * reach);
+            float open = reach * along;
+            float closed = (open - distance) / open;
+
+            if (closed < 0.0f)
+                closed = 0.0f;
+            else if (closed > 1.0f)
+                closed = 1.0f;
+            occlusion += probeWeight[probe] * along * closed;
+            total += probeWeight[probe] * along;
+        }
+    }
+    return total > 0.0f ? occlusion / total : 0.0f;
+}
+
+/* Fills model->occlusion once, from the hull's distance field.  Without a
+ * field every point keeps full brightness. */
+static const float *GetShip3dOcclusion(Ship3dModel *model, int type)
+{
+    const HullField *field;
+    float cell;
+    float sum = 0.0f;
+    int index;
+
+    if (model->occlusionTried)
+        return model->occlusion;
+    model->occlusionTried = 1;
+    field = SdlGetHullField(type);
+    if (field == NULL)
+        return NULL;
+    model->occlusion = SDL_malloc((size_t)model->count * sizeof(float));
+    if (model->occlusion == NULL)
+        return NULL;
+    cell = SdlGetHullFieldCell(field);
+    for (index = 0; index < model->count; index++) {
+        const Ship3dPoint *point = &model->points[index];
+        float brightness = 1.0f - SHIP3D_AO_STRENGTH *
+            MeasureShip3dOcclusion(field, cell, &point->x, &point->nx);
+
+        model->occlusion[index] = brightness;
+        sum += brightness;
+    }
+    fprintf(stderr, "ship3d: type %d ambient occlusion, mean brightness %.2f\n",
+            type, sum / (float)model->count);
+    return model->occlusion;
+}
+
+/* How far up its ramp the rim light moves a point with camera-space normal
+ * (x, y, z); the light comes from (+1, +1, +1). */
+static float GetShip3dRim(float normalX, float normalY, float normalZ)
+{
+    float edge = 1.0f + normalZ; /* 1 - n.v, the viewer at -z */
+    float facing = (normalX + normalY + normalZ) * 0.57735027f;
+
+    if (edge > 1.0f)
+        edge = 1.0f;
+    if (edge <= 0.0f || facing <= 0.0f)
+        return 0.0f;
+    return SHIP3D_RIM_STRENGTH * SDL_powf(edge, SHIP3D_RIM_POWER) * facing;
+}
+
+/* How far up its ramp the Fresnel term moves a point with camera-space
+ * normal z; it is only strong within a few degrees of edge-on. */
+static float GetShip3dFresnel(float normalZ)
+{
+    float edge = 1.0f + normalZ; /* 1 - n.v, the viewer at -z */
+    float squared;
+
+    if (edge <= 0.0f)
+        return 0.0f;
+    if (edge > 1.0f)
+        edge = 1.0f;
+    squared = edge * edge;
+    return SHIP3D_FRESNEL_STRENGTH * squared * squared * edge;
 }
 
 static void LoadShip3dModel(int type)
@@ -315,13 +547,14 @@ static void LoadShip3dModel(int type)
         SDL_memcpy(&point->x, record, 24);
     }
     model->count = count;
-    SDL_free(data);
-    if (!LoadShip3dLight(model, path)) {
+    if (!LoadShip3dLight(model, path, (const unsigned char *)body + 24)) {
+        SDL_free(data);
         SDL_free(model->points);
         model->points = NULL;
         model->count = 0;
         return;
     }
+    SDL_free(data);
     fprintf(stderr, "ship3d: loaded %d points from %s\n", count, path);
 }
 
@@ -400,7 +633,8 @@ int SdlShip3dGetPoints(int type, const float **xyz, int *stride, int *count)
 
 int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
 {
-    const Ship3dModel *model;
+    Ship3dModel *model;
+    const float *occlusion;
     RasterSurface surface;
     RasterClip clip;
     float basis[3][3]; /* model axis -> camera coordinates */
@@ -426,9 +660,10 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
     if (aeObjectClass[obj] != OBJECT_CLASS_CAPITAL_SHIP &&
         aeObjectClass[obj] != OBJECT_CLASS_SHIP)
         return 0;
-    model = GetShip3dModel(aeObjectTypeList[obj]);
+    model = (Ship3dModel *)GetShip3dModel(aeObjectTypeList[obj]);
     if (model == NULL)
         return 0;
+    occlusion = GetShip3dOcclusion(model, aeObjectTypeList[obj]);
     scale = (float)(unsigned short)asObjScreenScalesArray[obj] / 256.0f;
     if (scale <= 0.0f)
         return 1;
@@ -478,10 +713,12 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
     if (SdlShip3dUsesGl()) {
         int recorded = 0;
         int pointCount = 0;
+        int trueColour = g_bShip3dTrueColour && model->albedo != NULL;
 
         if (g_nShip3dGlPointCapacity < model->count) {
             SDL_free(g_pfShip3dGlPoints);
-            g_pfShip3dGlPoints = SDL_malloc((size_t)model->count * 6 *
+            g_pfShip3dGlPoints = SDL_malloc((size_t)model->count *
+                                            SHIP3D_GL_POINT_FLOATS *
                                             sizeof(float));
             g_nShip3dGlPointCapacity = g_pfShip3dGlPoints != NULL ?
                 model->count : 0;
@@ -512,7 +749,8 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
 
                 if (normalZ > 0.35f)
                     continue;
-                out = g_pfShip3dGlPoints + (size_t)pointCount * 6;
+                out = g_pfShip3dGlPoints +
+                      (size_t)pointCount * SHIP3D_GL_POINT_FLOATS;
                 out[0] = centerX + cameraX * scale - 0.5f;
                 out[1] = centerY + cameraY * scale - 0.5f;
                 depth = cameraZ * scale * (1.0f / 8192.0f);
@@ -524,19 +762,34 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
 
                     if (facing < 0.0f)
                         facing = 0.0f;
-                    else if (facing > 1.0f)
+                    facing += GetShip3dRim(normalX, normalY, normalZ) +
+                              GetShip3dFresnel(normalZ);
+                    if (facing > 1.0f)
                         facing = 1.0f;
-                    GetShip3dBlend(model->shade +
-                                       (size_t)index * model->steps,
-                                   model->steps,
-                                   facing * (float)(model->steps - 1),
-                                   out + 3);
+                    if (trueColour) {
+                        const float *albedo = model->albedo + (size_t)index * 3;
+                        float lit = 1.0f + model->kappa *
+                                               (facing - model->reference);
+
+                        if (lit < 0.05f || model->unlit[index])
+                            lit = model->unlit[index] ? 1.0f : 0.05f;
+                        out[3] = albedo[0] * lit;
+                        out[4] = albedo[1] * lit;
+                        out[5] = albedo[2] * lit;
+                    } else {
+                        GetShip3dBlend(model->shade +
+                                           (size_t)index * model->steps,
+                                       model->steps,
+                                       facing * (float)(model->steps - 1),
+                                       out + 3);
+                    }
+                    out[6] = occlusion != NULL ? occlusion[index] : 1.0f;
                 }
                 pointCount++;
             }
             recorded = SdlGlRendererRecordShip(
                 viewport, g_pfShip3dGlPoints, pointCount,
-                halfWidth > halfHeight ? halfWidth : halfHeight);
+                halfWidth > halfHeight ? halfWidth : halfHeight, trueColour);
         }
         if (recorded)
             return 1;
@@ -622,7 +875,11 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
         facing = normalX * lightX + normalY * lightY + normalZ * lightZ;
         if (facing < 0.0f)
             facing = 0.0f;
-        else if (facing > 1.0f)
+        if (occlusion != NULL)
+            facing *= occlusion[index];
+        facing += GetShip3dRim(normalX, normalY, normalZ) +
+                  GetShip3dFresnel(normalZ);
+        if (facing > 1.0f)
             facing = 1.0f;
         colour = model->shade[(size_t)index * model->steps +
                               (int)(facing * (float)(model->steps - 1) +
@@ -654,6 +911,9 @@ void SdlShip3dShutdown(void)
     for (type = 0; type < SHIP3D_TYPE_COUNT; type++) {
         SDL_free(g_aShip3dModels[type].points);
         SDL_free(g_aShip3dModels[type].shade);
+        SDL_free(g_aShip3dModels[type].occlusion);
+        SDL_free(g_aShip3dModels[type].albedo);
+        SDL_free(g_aShip3dModels[type].unlit);
         SDL_zero(g_aShip3dModels[type]);
     }
     SDL_free(g_pfShip3dDepth);

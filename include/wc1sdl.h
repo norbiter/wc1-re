@@ -267,6 +267,7 @@ int SdlRecordSpaceSprite(
     short flip);
 void SdlShip3dEnable(const char *directory);
 int SdlShip3dEnabled(void);
+void SdlShip3dEnableTrueColour(void);
 int SdlShip3dDraw(struct Viewport *viewport, short obj, float centerX,
                   float centerY);
 void SdlShip3dShutdown(void);

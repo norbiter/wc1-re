@@ -65,6 +65,7 @@ static void SdlPrintUsage(FILE *stream)
           "  --autosave, --no-autosave  Turn autosave checkpoints on or off\n"
           "  --enhanced              Experimental GL sharp-bilinear rendering\n"
           "  --ship3d[=PATH]         Render ships as 3D models\n"
+          "  --ship3d-truecolour     With --enhanced, shade 3D ships in true colour\n"
           "  --hitspheres            Show ship hit spheres\n"
           "  --shield-flash          Flash a hemisphere over a ship when its shields take a hit\n"
           "  --smooth                Smooth frame interpolation\n"
@@ -169,6 +170,8 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlShip3dEnable(NULL);
         } else if (strncmp(argument, "--ship3d=", 9) == 0) {
             SdlShip3dEnable(argument + 9);
+        } else if (strcmp(argument, "--ship3d-truecolour") == 0) {
+            SdlShip3dEnableTrueColour();
         } else if (strcmp(argument, "--hitspheres") == 0) {
             SdlHitSphereEnable();
         } else if (strcmp(argument, "--shield-flash") == 0) {

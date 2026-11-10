@@ -21,8 +21,14 @@ n.L and the renderer needs no knowledge of the model.  The sidecar (all
 little-endian) holds:
 
     char[4]   "S3DL"
-    uint32    version (2), uint32 point count, uint32 steps
+    uint32    version (2 or 3), uint32 point count, uint32 steps
+    float32   kappa, c                     (version 3 only)
     uint8     shade[count][steps]  palette index at n.L = step / (steps - 1)
+    float32   albedo_rgb[count][3]         (version 3 only; red < 0 where no
+                                            sprite saw the point)
+
+Version 3 is written for the quantised-RGB model.  Its extra fields let the
+GL layer shade in true colour, without snapping to the palette.
 
 Points no sprite saw keep their stored grey under any light.  Because the
 renderer emits palette indices rather than RGB, the game's own palette fades
@@ -207,8 +213,14 @@ def convert(npz_path, palette):
         shade, wrong = shade_banks(arrays, count, palette, fixed, stored)
 
     out = bytearray(b"S3DL")
-    out += struct.pack("<III", 2, count, STEPS)
-    out += shade
+    if "albedo_rgb" in arrays:
+        out += struct.pack("<III", 3, count, STEPS)
+        out += struct.pack("<ff", arrays["kappa"][1][0], arrays["c"][1][0])
+        out += shade
+        out += struct.pack("<%df" % (count * 3), *arrays["albedo_rgb"][1])
+    else:
+        out += struct.pack("<III", 2, count, STEPS)
+        out += shade
     with open(npz_path[:-4] + ".light", "wb") as f:
         f.write(out)
     return model, count, wrong
