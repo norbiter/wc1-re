@@ -91,6 +91,8 @@ typedef void (APIENTRY *GlTexSubImage3DProc)(
     const void *pixels);
 typedef void (APIENTRY *GlUniform1iProc)(GLint location, GLint value);
 typedef void (APIENTRY *GlUniform1fProc)(GLint location, GLfloat value);
+typedef void (APIENTRY *GlUniform3fProc)(GLint location, GLfloat x, GLfloat y,
+                                         GLfloat z);
 typedef void (APIENTRY *GlUniform4fProc)(GLint location, GLfloat x, GLfloat y,
                                          GLfloat z, GLfloat w);
 typedef void (APIENTRY *GlUseProgramProc)(GLuint program);
@@ -144,6 +146,7 @@ typedef struct GlFunctions {
     GlTexSubImage3DProc TexSubImage3D;
     GlUniform1iProc Uniform1i;
     GlUniform1fProc Uniform1f;
+    GlUniform3fProc Uniform3f;
     GlUniform4fProc Uniform4f;
     GlUseProgramProc UseProgram;
     GlVertexAttribPointerProc VertexAttribPointer;
@@ -197,6 +200,11 @@ typedef struct GlSprite {
     unsigned int shipFirst;
     unsigned int shipCount;
     float shipHalfExtent;
+    /* Nonzero for a translucent overlay (the shield flash): triangles of
+       overlayColour whose vertices carry their opacity in the blend field,
+       drawn without the depth test over what came before. */
+    int shipOverlay;
+    float overlayColour[3];
 } GlSprite;
 
 typedef struct GlShipPoint {
@@ -336,7 +344,11 @@ static const GLchar g_shipVertexShaderSource[] =
     "in vec3 a_shipPosition;\n"
     "in vec3 a_shipColour;\n"
     "uniform float u_pointSize;\n"
-    "flat out vec3 v_colour;\n"
+    "uniform sampler2D u_palette;\n"
+    "uniform int u_overlay;\n"
+    "uniform vec3 u_overlayColour;\n"
+    "out vec3 v_colour;\n"
+    "out float v_alpha;\n"
     "void main()\n"
     "{\n"
     "    vec2 position;\n"
@@ -344,21 +356,31 @@ static const GLchar g_shipVertexShaderSource[] =
     "    position.y = 1.0 - (a_shipPosition.y + 0.5) / 200.0 * 2.0;\n"
     "    gl_Position = vec4(position, a_shipPosition.z, 1.0);\n"
     "    gl_PointSize = u_pointSize;\n"
-    "    v_colour = a_shipColour;\n"
+    "    vec3 low = texelFetch(u_palette,\n"
+    "        ivec2(int(a_shipColour.x + 0.5), 0), 0).rgb;\n"
+    "    vec3 high = texelFetch(u_palette,\n"
+    "        ivec2(int(a_shipColour.y + 0.5), 0), 0).rgb;\n"
+    "    v_colour = mix(low, high, a_shipColour.z);\n"
+    "    v_alpha = 1.0;\n"
+    "    if (u_overlay != 0) {\n"
+    "        v_colour = u_overlayColour;\n"
+    "        v_alpha = a_shipColour.z;\n"
+    "    }\n"
     "}\n";
 
 /* Each point carries two palette entries and a blend between them.  The
-   palette is read here, per fragment, so palette fades act on ships and the
-   shading between ramp entries is continuous. */
+   vertex shader reads the palette every frame, so palette fades act on ships
+   and the shading between ramp entries is continuous.  Overlay runs carry an
+   opacity instead. */
 static const GLchar g_shipFragmentShaderSource[] =
     "#version 150\n"
-    "uniform sampler2D u_palette;\n"
     "uniform sampler2D u_baseIndices;\n"
     "uniform sampler2D u_viewMask;\n"
     "uniform int u_clearIndex;\n"
     "uniform vec4 u_viewport;\n"
     "uniform vec4 u_clip;\n"
-    "flat in vec3 v_colour;\n"
+    "in vec3 v_colour;\n"
+    "in float v_alpha;\n"
     "out vec4 outputColour;\n"
     "void main()\n"
     "{\n"
@@ -378,11 +400,7 @@ static const GLchar g_shipFragmentShaderSource[] =
     "        texelFetch(u_baseIndices, logical, 0).r * 255.0 + 0.5));\n"
     "    if (baseIndex != u_clearIndex)\n"
     "        discard;\n"
-    "    vec3 low = texelFetch(u_palette,\n"
-    "        ivec2(int(v_colour.x + 0.5), 0), 0).rgb;\n"
-    "    vec3 high = texelFetch(u_palette,\n"
-    "        ivec2(int(v_colour.y + 0.5), 0), 0).rgb;\n"
-    "    outputColour = vec4(mix(low, high, v_colour.z), 1.0);\n"
+    "    outputColour = vec4(v_colour * v_alpha, v_alpha);\n"
     "}\n";
 
 typedef struct GlRenderer {
@@ -403,6 +421,8 @@ typedef struct GlRenderer {
     GLint shipViewportUniform;
     GLint shipClipUniform;
     GLint shipPointSizeUniform;
+    GLint shipOverlayUniform;
+    GLint shipOverlayColourUniform;
     GlShipPoint *shipPoints;
     unsigned int shipPointCount;
     unsigned int shipPointCapacity;
@@ -573,6 +593,7 @@ static int LoadGlFunctions(void)
                          "glTexSubImage3D");
     LOAD_GL_FUNCTION(Uniform1i, GlUniform1iProc, "glUniform1i");
     LOAD_GL_FUNCTION(Uniform1f, GlUniform1fProc, "glUniform1f");
+    LOAD_GL_FUNCTION(Uniform3f, GlUniform3fProc, "glUniform3f");
     LOAD_GL_FUNCTION(Uniform4f, GlUniform4fProc, "glUniform4f");
     LOAD_GL_FUNCTION(UseProgram, GlUseProgramProc, "glUseProgram");
     LOAD_GL_FUNCTION(VertexAttribPointer, GlVertexAttribPointerProc,
@@ -695,11 +716,17 @@ static int LoadGlUniformLocations(void)
         g_renderer.shipProgram, "u_clip");
     g_renderer.shipPointSizeUniform = g_renderer.gl.GetUniformLocation(
         g_renderer.shipProgram, "u_pointSize");
+    g_renderer.shipOverlayUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.shipProgram, "u_overlay");
+    g_renderer.shipOverlayColourUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.shipProgram, "u_overlayColour");
     if (g_renderer.shipPaletteUniform < 0 || g_renderer.shipBaseUniform < 0 ||
         g_renderer.shipMaskUniform < 0 || g_renderer.shipClearUniform < 0 ||
         g_renderer.shipViewportUniform < 0 ||
         g_renderer.shipClipUniform < 0 ||
-        g_renderer.shipPointSizeUniform < 0) {
+        g_renderer.shipPointSizeUniform < 0 ||
+        g_renderer.shipOverlayUniform < 0 ||
+        g_renderer.shipOverlayColourUniform < 0) {
         fprintf(stderr, "OpenGL ship uniforms are unavailable.\n");
         return 0;
     }
@@ -1093,6 +1120,17 @@ static void DrawRecordedShip(const GlSprite *ship, float outputScale,
                             (float)ship->clipRight + 0.5f,
                             (float)ship->clipBottom + 0.5f);
     g_renderer.gl.Uniform1f(g_renderer.shipPointSizeUniform, pointSize);
+    g_renderer.gl.Uniform1i(g_renderer.shipOverlayUniform, ship->shipOverlay);
+    g_renderer.gl.Uniform3f(g_renderer.shipOverlayColourUniform,
+                            ship->overlayColour[0], ship->overlayColour[1],
+                            ship->overlayColour[2]);
+    if (ship->shipOverlay) {
+        g_renderer.gl.Enable(GL_BLEND);
+        g_renderer.gl.BlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        g_renderer.gl.DrawArrays(GL_TRIANGLES, 0, (GLsizei)ship->shipCount);
+        g_renderer.gl.Disable(GL_BLEND);
+        return;
+    }
     g_renderer.gl.Enable(GL_PROGRAM_POINT_SIZE);
     g_renderer.gl.Enable(GL_DEPTH_TEST);
     g_renderer.gl.DepthFunc(GL_LESS);
@@ -1524,8 +1562,9 @@ int SdlGlRendererRecordSpaceSprite(const Viewport *viewport, float x,
     return 1;
 }
 
-int SdlGlRendererRecordShip(const Viewport *viewport, const float *points,
-                            int count, float footprintHalfExtent)
+static int RecordShipVertices(const Viewport *viewport, const float *points,
+                              int count, float footprintHalfExtent,
+                              const float *overlayColour)
 {
     GlSprite *ship;
     GlShipPoint *destination;
@@ -1582,9 +1621,31 @@ int SdlGlRendererRecordShip(const Viewport *viewport, const float *points,
     ship->shipFirst = g_renderer.shipPointCount;
     ship->shipCount = (unsigned int)count;
     ship->shipHalfExtent = footprintHalfExtent;
+    if (overlayColour != 0) {
+        ship->shipOverlay = 1;
+        ship->overlayColour[0] = overlayColour[0];
+        ship->overlayColour[1] = overlayColour[1];
+        ship->overlayColour[2] = overlayColour[2];
+    }
     g_renderer.shipPointCount += (unsigned int)count;
     g_renderer.spriteCount++;
     return 1;
+}
+
+int SdlGlRendererRecordShip(const Viewport *viewport, const float *points,
+                            int count, float footprintHalfExtent)
+{
+    return RecordShipVertices(viewport, points, count, footprintHalfExtent, 0);
+}
+
+/* Records a translucent overlay: count vertices, three per triangle, in the
+ * point layout with the opacity (0..1) in the blend field, all of colour
+ * (RGB, 0..1). */
+int SdlGlRendererRecordShipOverlay(const Viewport *viewport,
+                                   const float *vertices, int count,
+                                   const float colour[3])
+{
+    return RecordShipVertices(viewport, vertices, count, 0.0f, colour);
 }
 
 int SdlGlRendererPresent(const unsigned char *pixels,

@@ -21,6 +21,9 @@ int SdlShip3dUsesGl(void);
 int SdlGlRendererRecordShip(const struct Viewport *viewport,
                                const float *points, int count,
                                float footprintHalfExtent);
+int SdlGlRendererRecordShipOverlay(const struct Viewport *viewport,
+                                   const float *vertices, int count,
+                                   const float colour[3]);
 int SdlConfigureVideoWindow(Uint32 *windowFlags);
 void SdlCalculateOutputViewport(int width, int height, int *left,
                                    int *bottom, int *viewportWidth,

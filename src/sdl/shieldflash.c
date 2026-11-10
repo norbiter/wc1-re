@@ -7,7 +7,12 @@
  * buffer through lookup tables from every palette index to the palette index
  * nearest its colour mixed with the flash colour.  There is one table per
  * quantised opacity level; they are rebuilt lazily whenever the palette
- * changes. */
+ * changes.
+ *
+ * When 3D ships go to the GL object layer, the flash goes there as well, as
+ * a smoothly shaded translucent disc at output resolution recorded right
+ * after its ship; blending it into the indexed buffer would punch a hole in
+ * the ship, which the GL layer only draws over empty space. */
 #include "wc1.h"
 
 #include "video_internal.h"
@@ -15,6 +20,10 @@
 #define SHIELD_FLASH_MS 300
 #define SHIELD_FLASH_LEVELS 5
 #define SHIELD_FLASH_PEAK_ALPHA 0.60f
+#define SHIELD_FLASH_GL_RINGS 12
+#define SHIELD_FLASH_GL_SEGMENTS 48
+#define SHIELD_FLASH_GL_FLOATS \
+    (SHIELD_FLASH_GL_RINGS * SHIELD_FLASH_GL_SEGMENTS * 2 * 3 * 6)
 
 typedef struct ShieldFlash {
     Uint32 startTicks;
@@ -32,6 +41,7 @@ static int g_abShieldFlashTableValid[SHIELD_FLASH_LEVELS];
 static int g_bShieldFlashPaletteValid;
 
 static const float g_afShieldFlashColour[3] = { 110.0f, 190.0f, 255.0f };
+static float g_afShieldFlashGlVertices[SHIELD_FLASH_GL_FLOATS];
 
 void SdlShieldFlashEnable(void)
 {
@@ -149,6 +159,80 @@ static const unsigned char *GetShieldFlashTable(int level)
     return g_aabShieldFlashTables[slot];
 }
 
+/* Opacity at (dx, dy) on the unit disc of the projected shell, or 0 where
+ * the near side faces away from the impact. */
+static float GetShieldFlashAlpha(float dx, float dy, const float direction[3],
+                                 float fade)
+{
+    float rim2 = dx * dx + dy * dy;
+    float facing;
+
+    if (rim2 >= 1.0f)
+        rim2 = 1.0f;
+    /* Near-side surface point; the camera looks along +z, so the visible
+     * hemisphere has negative z. */
+    facing = dx * direction[0] + dy * direction[1] -
+             SDL_sqrtf(1.0f - rim2) * direction[2];
+    if (facing <= 0.0f)
+        return 0.0f;
+    /* Strongest at the impact point, a little brighter at the silhouette
+     * where the shell is seen edge-on. */
+    return fade * (0.35f + 0.65f * facing) * (0.75f + 0.25f * rim2);
+}
+
+/* Records the flash as a disc of triangles in the GL object layer. */
+static int RecordShieldFlashGl(const Viewport *viewport, float centerX,
+                               float centerY, float projected,
+                               const float direction[3], float fade)
+{
+    float colour[3];
+    float *out = g_afShieldFlashGlVertices;
+    int ring;
+    int segment;
+
+    colour[0] = g_afShieldFlashColour[0] / 255.0f;
+    colour[1] = g_afShieldFlashColour[1] / 255.0f;
+    colour[2] = g_afShieldFlashColour[2] / 255.0f;
+    for (ring = 0; ring < SHIELD_FLASH_GL_RINGS; ring++) {
+        for (segment = 0; segment < SHIELD_FLASH_GL_SEGMENTS; segment++) {
+            /* The quad between two rings and two spokes, as two
+             * triangles: corner c is (ring + ringStep[c], segment +
+             * spokeStep[c]). */
+            static const int ringStep[6] = { 0, 1, 1, 0, 1, 0 };
+            static const int spokeStep[6] = { 0, 0, 1, 0, 1, 1 };
+            float alphas[6];
+            int corner;
+
+            for (corner = 0; corner < 6; corner++) {
+                float radius = (float)(ring + ringStep[corner]) /
+                               SHIELD_FLASH_GL_RINGS;
+                float angle = 6.28318531f *
+                              (float)(segment + spokeStep[corner]) /
+                              SHIELD_FLASH_GL_SEGMENTS;
+                float dx = radius * SDL_cosf(angle);
+                float dy = radius * SDL_sinf(angle);
+
+                alphas[corner] = SHIELD_FLASH_PEAK_ALPHA *
+                                 GetShieldFlashAlpha(dx, dy, direction, fade);
+                out[corner * 6] = centerX + dx * projected - 0.5f;
+                out[corner * 6 + 1] = centerY + dy * projected - 0.5f;
+                out[corner * 6 + 2] = 0.0f;
+                out[corner * 6 + 3] = 0.0f;
+                out[corner * 6 + 4] = 0.0f;
+                out[corner * 6 + 5] = alphas[corner];
+            }
+            if (alphas[0] + alphas[1] + alphas[2] > 0.0f ||
+                alphas[3] + alphas[4] + alphas[5] > 0.0f)
+                out += 36;
+        }
+    }
+    if (out == g_afShieldFlashGlVertices)
+        return 1;
+    return SdlGlRendererRecordShipOverlay(
+        viewport, g_afShieldFlashGlVertices,
+        (int)((out - g_afShieldFlashGlVertices) / 6), colour);
+}
+
 void SdlShieldFlashDraw(Viewport *viewport, short obj, float centerX,
                         float centerY)
 {
@@ -239,6 +323,11 @@ void SdlShieldFlashDraw(Viewport *viewport, short obj, float centerX,
     if (projected < 2.0f)
         projected = 2.0f;
 
+    if (SdlShip3dUsesGl() &&
+        RecordShieldFlashGl(viewport, centerX, centerY, projected, direction,
+                            fade))
+        return;
+
     viewLeft = viewport->left;
     viewTop = viewport->top;
     viewWidth = viewport->right - viewport->left + 1;
@@ -265,23 +354,13 @@ void SdlShieldFlashDraw(Viewport *viewport, short obj, float centerX,
         for (column = firstX; column <= lastX; column++) {
             float dx = ((float)(column + viewLeft) + 0.5f - centerX) /
                        projected;
-            float rim2 = dx * dx + dy * dy;
-            float facing;
             float alpha;
             int level;
             int current;
 
-            if (rim2 >= 1.0f)
+            if (dx * dx + dy * dy >= 1.0f)
                 continue;
-            /* Near-side surface point; the camera looks along +z, so the
-             * visible hemisphere has negative z. */
-            facing = dx * direction[0] + dy * direction[1] -
-                     SDL_sqrtf(1.0f - rim2) * direction[2];
-            if (facing <= 0.0f)
-                continue;
-            /* Strongest at the impact point, a little brighter at the
-             * silhouette where the shell is seen edge-on. */
-            alpha = fade * (0.35f + 0.65f * facing) * (0.75f + 0.25f * rim2);
+            alpha = GetShieldFlashAlpha(dx, dy, direction, fade);
             level = (int)(alpha * SHIELD_FLASH_LEVELS + 0.5f);
             if (level < 1)
                 continue;

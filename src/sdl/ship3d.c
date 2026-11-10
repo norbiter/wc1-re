@@ -89,12 +89,12 @@ int SdlShip3dEnabled(void)
 
 /* With the GL renderer the ships are drawn at output resolution in the
  * object layer.  The hit-sphere overlay and the EGA filter work on the
- * indexed frame, so they keep the ships there. */
+ * indexed frame, so they keep the ships there.  The shield flash follows
+ * the ships into the GL layer. */
 int SdlShip3dUsesGl(void)
 {
     return g_bShip3dEnabled && SdlUsingGlRenderer() &&
-           !SdlHitSphereEnabled() && !SdlShieldFlashEnabled() &&
-           !SdlEgaDitherEnabled();
+           !SdlHitSphereEnabled() && !SdlEgaDitherEnabled();
 }
 
 static unsigned char *ReadShip3dFile(const char *path, size_t *length)
