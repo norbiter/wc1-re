@@ -649,6 +649,12 @@ short auto_pilot_valid(short showReason)
     } else if (pActiveHazardField != 0) {
         reason = _("Hazard Near");
     }
+#ifdef SDL_PORT
+    /* Fork fix: a friendly ship still waiting to jump in here would be left
+     * behind by autopilot (mission 7-1's second Drayman). */
+    if (reason == 0)
+        reason = SdlAutopilotWaitReason();
+#endif
     if (showReason != 0 && reason != 0)
         set_global_message(reason, cYellowColour, 3);
     return reason == 0;

@@ -583,6 +583,7 @@ MODERN_GAME_HOST_SRCS = \
 	src/sdl/nofriendlyfire.c \
 	src/sdl/lowmissile.c \
 	src/sdl/sturdyfriends.c \
+	src/sdl/autopilotwait.c \
 	src/sdl/gunrange.c \
 	src/sdl/inputcurve.c \
 	src/sdl/smooth.c \
