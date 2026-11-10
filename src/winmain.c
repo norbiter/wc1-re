@@ -216,6 +216,11 @@ void init_hazard(short obj, FixedVector position, short moving)
     int separation;
 
     hazardMoves = moving;
+#ifdef SDL_PORT
+    /* --fair-asteroids: no rocks aimed at the player's predicted position. */
+    if (SdlFairAsteroidsEnabled())
+        hazardMoves = 0;
+#endif
     if (pActiveHazardField->type == OBJECT_TYPE_ASTEROID_FIELD)
         type = (enum ObjectType)(OBJECT_TYPE_ASTEROID1 +
                                 RandomBelowOrEqual(5));

@@ -294,6 +294,8 @@ int SdlAiThrottleDefers(short obj);
 void SdlNoFriendlyFireEnable(void);
 int SdlNoFriendlyFireSpares(short attacker, short victim);
 int SdlNoFriendlyFireBlocks(short obj, short partner);
+void SdlFairAsteroidsEnable(void);
+int SdlFairAsteroidsEnabled(void);
 void SdlLowMissileEnable(void);
 void SdlLowMissileTrim(short obj, short type);
 void SdlSturdyFriendsEnable(void);
