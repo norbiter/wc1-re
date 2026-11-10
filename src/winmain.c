@@ -266,7 +266,15 @@ void init_hazard(short obj, FixedVector position, short moving)
                      speed << 8, &aShipVelocity[obj]);
 
     if (hazardMoves == 0) {
+#ifdef SDL_PORT
+        /* Retail compared the rock's own type against the field type, which
+         * never matched, so stationary asteroids took the mines' random
+         * 0..1000-unit setback. Asteroids now keep the intended 1500
+         * (8.8 fixed, about 6 units), staying at their chosen spawn spot. */
+        if (type != OBJECT_TYPE_SPACE_MINE)
+#else
         if (type == OBJECT_TYPE_ASTEROID_FIELD)
+#endif
             separation = 1500;
         else
             separation = RandomBelowOrEqual(1000) << 8;
