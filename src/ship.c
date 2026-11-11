@@ -2399,14 +2399,12 @@ unsigned int reposition_fixed_child_objects(void)
                     /* Match the anchor to the enhanced parent transform. */
                     parentScreenX =
                         (float)nCurrentViewCenterPosX +
-                        (float)(((double)(nScreenWidth & ~1) *
-                                 0.5 *
+                        (float)(((double)SdlFovFocal() *
                                  aObjectViewPositionsList[parent].x) /
                                 aObjectViewPositionsList[parent].z);
                     parentScreenY =
                         (float)nCurrentViewCenterPosY +
-                        (float)(((double)(nScreenWidth & ~1) *
-                                 0.5 *
+                        (float)(((double)SdlFovFocal() *
                                  aObjectViewPositionsList[parent].y) /
                                 aObjectViewPositionsList[parent].z);
                     GetRLETransformTrig(angle * 10,

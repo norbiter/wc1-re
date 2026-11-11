@@ -1934,7 +1934,11 @@ void target_locking(signed char target)
         }
         radiusSquared = y * y;
         radiusSquared += x * x;
+#ifdef SDL_PORT
+        if (radiusSquared > SdlFovLockRadiusSquared()) {
+#else
         if (radiusSquared > 0xe10) {
+#endif
             lock_off();
             return;
         }
@@ -2143,6 +2147,12 @@ void draw_target_box(unsigned short colour, signed char object,
     } else {
         valid = object != -1 &&
                 asObjectScreenXList[object] != -0x7fff;
+#ifdef SDL_PORT
+        /* GetTransformedShapeBounds reports a shapeless object as inside
+         * the viewport without filling in the bounds. */
+        if (valid != 0 && apObjShapeArray[object] == 0)
+            valid = 0;
+#endif
         if (valid != 0) {
             centerX = (asObjectScreenXList[object] +
                               nCurrentViewCenterPosX);
@@ -2312,6 +2322,18 @@ void draw_nav_pointer(void)
     if (DivideFixed(viewPosition.z, distance) < 0x94)
 #endif
         return;
+#ifdef SDL_PORT
+    asObjectScreenXList[nNavPointerObject] = (DivideFixed(
+        MultiplyFixed(
+            SdlFovFocalFixed(),
+            viewPosition.x),
+        viewPosition.z) >> 8);
+    asObjectScreenYArray[nNavPointerObject] = (DivideFixed(
+        MultiplyFixed(
+            SdlFovFocalFixed(),
+            viewPosition.y),
+        viewPosition.z) >> 8);
+#else
     asObjectScreenXList[nNavPointerObject] = (DivideFixed(
         MultiplyFixed(
             (short)(nScreenWidth & ~1) << 7,
@@ -2322,6 +2344,7 @@ void draw_nav_pointer(void)
             (short)(nScreenWidth & ~1) << 7,
             viewPosition.y),
         viewPosition.z) >> 8);
+#endif
     asObjDistancesTable[nNavPointerObject] = 0x4a38;
 }
 

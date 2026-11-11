@@ -589,6 +589,7 @@ MODERN_GAME_HOST_SRCS = \
 	src/sdl/inputcurve.c \
 	src/sdl/smooth.c \
 	src/sdl/aspectless.c \
+	src/sdl/fov.c \
 	src/sdl/missionmenu.c \
 	src/sdl/hullfield.c \
 	src/sdl/video.c

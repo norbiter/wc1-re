@@ -33,7 +33,6 @@ static unsigned char *g_pWideAllocation;
 static int *g_pWideRows;
 static int g_nMarginX;
 static int g_nMarginY;
-static int g_nViewCone = ASPECTLESS_ORIGINAL_VIEW_CONE;
 /* The viewport rectangle currently covers the margins. */
 static int g_bWidened;
 /* The backdrop holds the frame last dumped to the screen. */
@@ -103,26 +102,11 @@ void SdlAspectlessGetAllocationMargins(const struct Viewport *viewport,
 void SdlAspectlessAdoptSpaceBuffer(const struct Viewport *viewport,
                                    int marginX, int marginY)
 {
-    double halfWidth;
-    double halfHeight;
-    double cosine;
-
     g_pWideAllocation = viewport->allocation;
     g_pWideRows = viewport->rowOffsets;
     g_nMarginX = marginX;
     g_nMarginY = marginY;
     g_bWidened = 0;
-    /* transform_objects_to_your_view drops whatever lies outside a cone
-     * that just clears the corners of a 320x200 view.  Open it to clear
-     * the corners of this one, allowing for the 50 rows by which the side
-     * and rear views move the centre down. */
-    halfWidth = SDL_PORT_FRAME_WIDTH / 2 + marginX;
-    halfHeight = SDL_PORT_FRAME_HEIGHT / 2 + marginY + 50;
-    cosine = 160.0 / sqrt(160.0 * 160.0 + halfWidth * halfWidth +
-                          halfHeight * halfHeight);
-    g_nViewCone = (int)(cosine * 256.0 * 0.9);
-    if (g_nViewCone > ASPECTLESS_ORIGINAL_VIEW_CONE)
-        g_nViewCone = ASPECTLESS_ORIGINAL_VIEW_CONE;
 }
 
 static int SpaceBufferIsWide(void)
@@ -158,7 +142,6 @@ int *SdlAspectlessReleaseRows(int *rowOffsets)
     g_pWideRows = 0;
     g_nMarginX = 0;
     g_nMarginY = 0;
-    g_nViewCone = ASPECTLESS_ORIGINAL_VIEW_CONE;
     g_bWidened = 0;
     g_bBackdropValid = 0;
     return rowOffsets;
@@ -178,11 +161,32 @@ int SdlAspectlessClearSpaceBuffer(const struct Viewport *viewport,
     return 1;
 }
 
+/* transform_objects_to_your_view drops whatever lies outside a cone that
+ * just clears the corners of a 320x200 view at the original focal length.
+ * Open it to clear the corners of the frame being drawn at the focal length
+ * in use (--fov shortens it), allowing for the 50 rows by which the side
+ * and rear views move the centre down. */
 int SdlAspectlessViewCone(void)
 {
-    if (bCockpitlessView > 0 && SpaceBufferIsWide())
-        return g_nViewCone;
-    return ASPECTLESS_ORIGINAL_VIEW_CONE;
+    double focal;
+    double halfWidth;
+    double halfHeight;
+    int cone;
+    int wide;
+
+    if (bCockpitlessView <= 0)
+        return ASPECTLESS_ORIGINAL_VIEW_CONE;
+    wide = SpaceBufferIsWide();
+    focal = SdlFovFocal();
+    if (!wide && focal >= SDL_PORT_FRAME_WIDTH / 2)
+        return ASPECTLESS_ORIGINAL_VIEW_CONE;
+    halfWidth = SDL_PORT_FRAME_WIDTH / 2 + (wide ? g_nMarginX : 0);
+    halfHeight = SDL_PORT_FRAME_HEIGHT / 2 + (wide ? g_nMarginY : 0) + 50;
+    cone = (int)(focal / sqrt(focal * focal + halfWidth * halfWidth +
+                              halfHeight * halfHeight) * 256.0 * 0.9);
+    if (cone > ASPECTLESS_ORIGINAL_VIEW_CONE)
+        cone = ASPECTLESS_ORIGINAL_VIEW_CONE;
+    return cone;
 }
 
 /* Called before a frame's objects are drawn.  Returns nonzero, with the

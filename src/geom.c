@@ -1300,15 +1300,29 @@ void transform_objects_to_your_view(void)
             if (distance <= objectRadius)
                 distance = objectRadius + 1;
             if (aeObjectClass[obj] >= OBJECT_CLASS_EXPLOSION) {
+#ifdef SDL_PORT
+                scaleFactor = DivideFixed(
+                    SdlFovFocalFixed() << 8,
+                    distance - objectRadius);
+#else
                 scaleFactor = DivideFixed(
                     (short)(nScreenWidth & ~1) << 15,
                     distance - objectRadius);
+#endif
                 screenScale = (
                     MultiplyFixed(
                                       awObjectScales[obj],
                                   scaleFactor) >> 8);
                 if ((unsigned short)screenScale >= 0x2000)
                     screenScale = 0x2000;
+#ifdef SDL_PORT
+                /* A wide --fov shrinks everything, but must not shorten the
+                 * range at which the game stops drawing (and targeting) an
+                 * object. */
+                screenScale = SdlFovKeepVisibleScale(
+                    screenScale, awObjectScales[obj],
+                    distance - objectRadius);
+#endif
                 asObjScreenScalesArray[obj] = screenScale;
                 if ((unsigned short)screenScale <= 4) {
                     asObjectScreenXList[obj] =
@@ -1318,6 +1332,18 @@ void transform_objects_to_your_view(void)
             }
             asObjDistancesTable[obj] =
                 (distance >> 8);
+#ifdef SDL_PORT
+            asObjectScreenXList[obj] = (DivideFixed(
+                MultiplyFixed(
+                    SdlFovFocalFixed(),
+                    aObjectViewPositionsList[obj].x),
+                aObjectViewPositionsList[obj].z) >> 8);
+            asObjectScreenYArray[obj] = (DivideFixed(
+                MultiplyFixed(
+                    SdlFovFocalFixed(),
+                    aObjectViewPositionsList[obj].y),
+                aObjectViewPositionsList[obj].z) >> 8);
+#else
             asObjectScreenXList[obj] = (DivideFixed(
                 MultiplyFixed(
                     (short)(nScreenWidth & ~1) << 7,
@@ -1328,6 +1354,7 @@ void transform_objects_to_your_view(void)
                     (short)(nScreenWidth & ~1) << 7,
                     aObjectViewPositionsList[obj].y),
                 aObjectViewPositionsList[obj].z) >> 8);
+#endif
             switch (aeObjectClass[obj]) {
             case OBJECT_CLASS_PLANET:
                 if (asObjScreenScalesArray[obj] == 0xff)

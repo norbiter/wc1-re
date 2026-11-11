@@ -984,24 +984,24 @@ void draw_sorted_objects_to_buffer(void)
             aObjectViewPositionsList[obj].z != 0) {
             projectedScreenX = (DivideFixed(
                 MultiplyFixed(
-                    (short)(nScreenWidth & ~1) << 7,
+                    SdlFovFocalFixed(),
                     aObjectViewPositionsList[obj].x),
                 aObjectViewPositionsList[obj].z) >> 8);
             projectedScreenY = (DivideFixed(
                 MultiplyFixed(
-                    (short)(nScreenWidth & ~1) << 7,
+                    SdlFovFocalFixed(),
                     aObjectViewPositionsList[obj].y),
                 aObjectViewPositionsList[obj].z) >> 8);
             if (projectedScreenX == asObjectScreenXList[obj] &&
                 projectedScreenY == asObjectScreenYArray[obj]) {
                 enhancedScreenX =
                     (float)nCurrentViewCenterPosX +
-                    (float)(((double)(nScreenWidth & ~1) * 0.5 *
+                    (float)(((double)SdlFovFocal() *
                              aObjectViewPositionsList[obj].x) /
                             aObjectViewPositionsList[obj].z);
                 enhancedScreenY =
                     (float)nCurrentViewCenterPosY +
-                    (float)(((double)(nScreenWidth & ~1) * 0.5 *
+                    (float)(((double)SdlFovFocal() *
                              aObjectViewPositionsList[obj].y) /
                             aObjectViewPositionsList[obj].z);
             }

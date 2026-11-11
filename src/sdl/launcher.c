@@ -80,6 +80,8 @@ static void SdlPrintUsage(FILE *stream)
           "  --fair-asteroids        No asteroids spawned on an intercept course\n"
           "  --aspectless            Cockpit-less flight fills a fullscreen display\n"
           "                          of any aspect ratio\n"
+          "  --fov=DEGREES           Horizontal field of view of cockpit-less\n"
+          "                          flight, 60-140 (default 90)\n"
           "  --mission-menu          Enable the mission menu\n"
           "  --cheats                Enable cheat mode\n"
           "  --joystick-debug        Log joystick input\n"
@@ -204,6 +206,8 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlFairAsteroidsEnable();
         } else if (strcmp(argument, "--aspectless") == 0) {
             SdlAspectlessEnable();
+        } else if (strncmp(argument, "--fov=", 6) == 0) {
+            SdlFovSet(atoi(argument + 6));
         } else if (strcmp(argument, "--mission-menu") == 0) {
             SdlMissionMenuEnable();
         } else if (strcmp(argument, "--cheats") == 0) {

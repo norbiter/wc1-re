@@ -304,6 +304,11 @@ int *SdlAspectlessReleaseRows(int *rowOffsets);
 int SdlAspectlessClearSpaceBuffer(const struct Viewport *viewport,
                                   short colour);
 int SdlAspectlessViewCone(void);
+void SdlFovSet(int degrees);
+int SdlFovFocalFixed(void);
+float SdlFovFocal(void);
+int SdlFovKeepVisibleScale(int screenScale, int objectScale, int distance);
+int SdlFovLockRadiusSquared(void);
 void SdlFairAsteroidsEnable(void);
 int SdlFairAsteroidsEnabled(void);
 void SdlLowMissileEnable(void);

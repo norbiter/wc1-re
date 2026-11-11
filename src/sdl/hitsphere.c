@@ -120,7 +120,7 @@ static int DrawHullVolume(Viewport *viewport, short obj, float centerX,
     unitsPerModel = (float)(unsigned short)awObjectScales[obj] / 256.0f;
     if (unitsPerModel <= 0.0f)
         return 1;
-    pixelsPerModel = (float)(nScreenWidth & ~1) * 0.5f * unitsPerModel / depth;
+    pixelsPerModel = SdlFovFocal() * unitsPerModel / depth;
     boltRadius = (float)aObjectTypeData[OBJECT_TYPE_LASER_CANNON]
                      .collisionRadius / unitsPerModel;
     cell = SdlGetHullFieldCell(field);
@@ -231,7 +231,7 @@ void SdlHitSphereDraw(Viewport *viewport, short obj, float centerX,
     distance = SDL_sqrtf(x * x + y * y + z * z);
     if (radius <= 0.0f || distance <= radius || z <= 0.0f)
         return;
-    focal = (float)(nScreenWidth & ~1) * 0.5f;
+    focal = SdlFovFocal();
     /* Angular radius of the sphere seen from the eye. */
     projected = focal * radius / SDL_sqrtf(distance * distance - radius * radius);
     if (projected < 1.0f)

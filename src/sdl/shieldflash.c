@@ -318,7 +318,7 @@ void SdlShieldFlashDraw(Viewport *viewport, short obj, float centerX,
     distance = SDL_sqrtf(x * x + y * y + z * z);
     if (radius <= 0.0f || distance <= radius || z <= 0.0f)
         return;
-    projected = (float)(nScreenWidth & ~1) * 0.5f * radius /
+    projected = SdlFovFocal() * radius /
                 SDL_sqrtf(distance * distance - radius * radius);
     if (projected < 2.0f)
         projected = 2.0f;
