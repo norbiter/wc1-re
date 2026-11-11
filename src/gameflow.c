@@ -498,7 +498,12 @@ void __stdcall free_viewport(Viewport *viewport)
             }
         }
         if (viewport->rowOffsets != 0) {
+#ifdef SDL_PORT
+            ReleasePacketHandle(
+                SdlAspectlessReleaseRows(viewport->rowOffsets));
+#else
             ReleasePacketHandle(viewport->rowOffsets);
+#endif
             viewport->rowOffsets = 0;
         }
 #if !defined(SDL_PORT) || defined(SDL_PORT_LEGACY_DEBUG_OUTPUT)

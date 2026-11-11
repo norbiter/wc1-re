@@ -1285,8 +1285,13 @@ void transform_objects_to_your_view(void)
                 asObjectScreenXList[obj] = 0x8001;
                 continue;
             }
+#ifdef SDL_PORT
+            if (DivideFixed(aObjectViewPositionsList[obj].z,
+                            distance) < SdlAspectlessViewCone()) {
+#else
             if (DivideFixed(aObjectViewPositionsList[obj].z,
                             distance) < 0x94) {
+#endif
                 asObjectScreenXList[obj] = 0x8001;
                 continue;
             }

@@ -249,6 +249,7 @@ static const GLchar g_vertexShaderSource[] =
     "in vec4 a_atlasRect;\n"
     "in vec4 a_clip;\n"
     "in vec2 a_spriteInfo;\n"
+    "uniform vec4 u_frame;\n"
     "out vec2 v_texCoord;\n"
     "out vec2 v_screen;\n"
     "flat out vec4 v_atlasRect;\n"
@@ -257,8 +258,8 @@ static const GLchar g_vertexShaderSource[] =
     "void main()\n"
     "{\n"
     "    vec2 position;\n"
-    "    position.x = (a_position.x + 0.5) / 320.0 * 2.0 - 1.0;\n"
-    "    position.y = 1.0 - (a_position.y + 0.5) / 200.0 * 2.0;\n"
+    "    position.x = (a_position.x + 0.5) / u_frame.x * 2.0 - 1.0;\n"
+    "    position.y = 1.0 - (a_position.y + 0.5) / u_frame.y * 2.0;\n"
     "    gl_Position = vec4(position, 0.0, 1.0);\n"
     "    v_texCoord = a_texCoord;\n"
     "    v_screen = a_position;\n"
@@ -318,8 +319,9 @@ static const GLchar g_spriteFragmentShaderSource[] =
     "        v_screen.x > v_clip.z || v_screen.y > v_clip.w)\n"
     "        discard;\n"
     "    ivec2 logical = ivec2(floor(v_screen + vec2(0.5)));\n"
+    "    ivec2 frame = textureSize(u_viewMask, 0);\n"
     "    if (logical.x < 0 || logical.y < 0 ||\n"
-    "        logical.x >= 320 || logical.y >= 200)\n"
+    "        logical.x >= frame.x || logical.y >= frame.y)\n"
     "        discard;\n"
     "    if (texelFetch(u_viewMask, logical, 0).r < 0.5)\n"
     "        discard;\n"
@@ -353,13 +355,14 @@ static const GLchar g_shipVertexShaderSource[] =
     "uniform int u_overlay;\n"
     "uniform vec3 u_overlayColour;\n"
     "uniform int u_trueColour;\n"
+    "uniform vec4 u_frame;\n"
     "out vec3 v_colour;\n"
     "out float v_alpha;\n"
     "void main()\n"
     "{\n"
     "    vec2 position;\n"
-    "    position.x = (a_shipPosition.x + 0.5) / 320.0 * 2.0 - 1.0;\n"
-    "    position.y = 1.0 - (a_shipPosition.y + 0.5) / 200.0 * 2.0;\n"
+    "    position.x = (a_shipPosition.x + 0.5) / u_frame.x * 2.0 - 1.0;\n"
+    "    position.y = 1.0 - (a_shipPosition.y + 0.5) / u_frame.y * 2.0;\n"
     "    gl_Position = vec4(position, a_shipPosition.z, 1.0);\n"
     "    gl_PointSize = u_pointSize;\n"
     "    vec3 low = texelFetch(u_palette,\n"
@@ -394,14 +397,16 @@ static const GLchar g_shipFragmentShaderSource[] =
     "void main()\n"
     "{\n"
     "    vec2 edge = (gl_FragCoord.xy - u_viewport.xy) / u_viewport.zw;\n"
-    "    edge = vec2(edge.x * 320.0, (1.0 - edge.y) * 200.0);\n"
+    "    ivec2 frame = textureSize(u_viewMask, 0);\n"
+    "    edge = vec2(edge.x * float(frame.x),\n"
+    "                (1.0 - edge.y) * float(frame.y));\n"
     "    vec2 screen = edge - vec2(0.5);\n"
     "    if (screen.x < u_clip.x || screen.y < u_clip.y ||\n"
     "        screen.x > u_clip.z || screen.y > u_clip.w)\n"
     "        discard;\n"
     "    ivec2 logical = ivec2(floor(edge));\n"
     "    if (logical.x < 0 || logical.y < 0 ||\n"
-    "        logical.x >= 320 || logical.y >= 200)\n"
+    "        logical.x >= frame.x || logical.y >= frame.y)\n"
     "        discard;\n"
     "    if (texelFetch(u_viewMask, logical, 0).r < 0.5)\n"
     "        discard;\n"
@@ -433,6 +438,15 @@ typedef struct GlRenderer {
     GLint shipOverlayUniform;
     GLint shipOverlayColourUniform;
     GLint shipTrueColourUniform;
+    GLint shipFrameUniform;
+    GLint baseFrameUniform;
+    GLint spriteFrameUniform;
+    /* The frame being presented, and the one the recorded sprites were
+       positioned for: 320x200 unless --aspectless added margins. */
+    int frameWidth;
+    int frameHeight;
+    int recordedFrameWidth;
+    int recordedFrameHeight;
     GlShipPoint *shipPoints;
     unsigned int shipPointCount;
     unsigned int shipPointCapacity;
@@ -462,6 +476,7 @@ typedef struct GlRenderer {
     size_t decodeScratchCapacity;
     GlAtlasLayer atlasLayers[GL_RENDERER_SPRITE_ATLAS_LAYER_CAPACITY];
     unsigned char viewMask[SDL_PORT_FRAME_WIDTH * SDL_PORT_FRAME_HEIGHT];
+    unsigned char wideViewMask[SDL_PORT_FRAME_MAX_PIXELS];
     unsigned char spaceFrameBase[SDL_PORT_FRAME_WIDTH * SDL_PORT_FRAME_HEIGHT];
     unsigned char presentedFrame[SDL_PORT_FRAME_WIDTH * SDL_PORT_FRAME_HEIGHT];
     unsigned char presentedPalette[256 * 4];
@@ -733,6 +748,12 @@ static int LoadGlUniformLocations(void)
         g_renderer.shipProgram, "u_overlayColour");
     g_renderer.shipTrueColourUniform = g_renderer.gl.GetUniformLocation(
         g_renderer.shipProgram, "u_trueColour");
+    g_renderer.shipFrameUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.shipProgram, "u_frame");
+    g_renderer.baseFrameUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.baseProgram, "u_frame");
+    g_renderer.spriteFrameUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.spriteProgram, "u_frame");
     if (g_renderer.shipPaletteUniform < 0 || g_renderer.shipBaseUniform < 0 ||
         g_renderer.shipMaskUniform < 0 || g_renderer.shipClearUniform < 0 ||
         g_renderer.shipViewportUniform < 0 ||
@@ -740,7 +761,8 @@ static int LoadGlUniformLocations(void)
         g_renderer.shipPointSizeUniform < 0 ||
         g_renderer.shipOverlayUniform < 0 ||
         g_renderer.shipOverlayColourUniform < 0 ||
-        g_renderer.shipTrueColourUniform < 0) {
+        g_renderer.shipTrueColourUniform < 0 ||
+        g_renderer.shipFrameUniform < 0) {
         fprintf(stderr, "OpenGL ship uniforms are unavailable.\n");
         return 0;
     }
@@ -749,7 +771,9 @@ static int LoadGlUniformLocations(void)
         g_renderer.spriteIndicesUniform < 0 ||
         g_renderer.spritePaletteUniform < 0 ||
         g_renderer.spriteBaseUniform < 0 || g_renderer.spriteMaskUniform < 0 ||
-        g_renderer.spriteClearUniform < 0) {
+        g_renderer.spriteClearUniform < 0 ||
+        g_renderer.baseFrameUniform < 0 ||
+        g_renderer.spriteFrameUniform < 0) {
         fprintf(stderr, "OpenGL renderer uniforms are unavailable.\n");
         return 0;
     }
@@ -954,18 +978,23 @@ static void DrawGlQuad(const GlVertex *vertices)
 
 static void DrawBaseFrame(void)
 {
+    const float right = (float)g_renderer.frameWidth - 0.5f;
+    const float bottom = (float)g_renderer.frameHeight - 0.5f;
     const GlVertex vertices[4] = {
         {-0.5f, -0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
          0.0f, 0.0f, 0.0f, 0.0f},
-        {-0.5f, 199.5f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+        {-0.5f, bottom, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
          0.0f, 0.0f, 0.0f, 0.0f},
-        {319.5f, -0.5f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+        {right, -0.5f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
          0.0f, 0.0f, 0.0f, 0.0f},
-        {319.5f, 199.5f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+        {right, bottom, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
          0.0f, 0.0f, 0.0f, 0.0f}};
 
     g_renderer.gl.Disable(GL_BLEND);
     g_renderer.gl.UseProgram(g_renderer.baseProgram);
+    g_renderer.gl.Uniform4f(g_renderer.baseFrameUniform,
+                            (float)g_renderer.frameWidth,
+                            (float)g_renderer.frameHeight, 0.0f, 0.0f);
     g_renderer.gl.ActiveTexture(GL_TEXTURE0);
     g_renderer.gl.BindTexture(GL_TEXTURE_2D, g_renderer.baseTexture);
     g_renderer.gl.ActiveTexture(GL_TEXTURE1);
@@ -1094,6 +1123,9 @@ static void DrawSpriteRun(unsigned int first, unsigned int end)
     g_renderer.gl.Uniform1i(g_renderer.spriteMaskUniform, 3);
     g_renderer.gl.Uniform1i(g_renderer.spriteClearUniform,
                             g_renderer.spaceClearColour);
+    g_renderer.gl.Uniform4f(g_renderer.spriteFrameUniform,
+                            (float)g_renderer.frameWidth,
+                            (float)g_renderer.frameHeight, 0.0f, 0.0f);
     g_renderer.gl.DrawArrays(GL_TRIANGLES, (GLint)(first * 6U),
                              (GLsizei)((end - first) * 6U));
     g_renderer.gl.Disable(GL_BLEND);
@@ -1125,6 +1157,9 @@ static void DrawRecordedShip(const GlSprite *ship, float outputScale,
     g_renderer.gl.Uniform1i(g_renderer.shipMaskUniform, 3);
     g_renderer.gl.Uniform1i(g_renderer.shipClearUniform,
                             g_renderer.spaceClearColour);
+    g_renderer.gl.Uniform4f(g_renderer.shipFrameUniform,
+                            (float)g_renderer.frameWidth,
+                            (float)g_renderer.frameHeight, 0.0f, 0.0f);
     g_renderer.gl.Uniform4f(g_renderer.shipViewportUniform,
                             (float)viewportLeft, (float)viewportBottom,
                             (float)viewportWidth, (float)viewportHeight);
@@ -1206,11 +1241,19 @@ static int RenderGlFrame(const unsigned char *pixels,
     int viewportBottom;
     int viewportWidth;
     int viewportHeight;
+    const unsigned char *mask;
 
     if (g_renderer.window == 0 || g_renderer.context == 0)
         return 0;
     if (SDL_GL_MakeCurrent(g_renderer.window, g_renderer.context) != 0)
         return 0;
+    pixels = SdlComposeFrame(pixels, &g_renderer.frameWidth,
+                             &g_renderer.frameHeight);
+    /* Sprites recorded for a frame of another size would land in the wrong
+       place; that frame is gone. */
+    if (g_renderer.frameWidth != g_renderer.recordedFrameWidth ||
+        g_renderer.frameHeight != g_renderer.recordedFrameHeight)
+        drawSprites = 0;
     SDL_GL_GetDrawableSize(g_renderer.window, &drawableWidth, &drawableHeight);
     if (drawableWidth < 1 || drawableHeight < 1)
         return 0;
@@ -1219,14 +1262,22 @@ static int RenderGlFrame(const unsigned char *pixels,
                                   &viewportHeight);
     g_renderer.gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
     g_renderer.gl.ActiveTexture(GL_TEXTURE0);
-    UploadIndexTexture(g_renderer.baseTexture, SDL_PORT_FRAME_WIDTH,
-                       SDL_PORT_FRAME_HEIGHT, pixels);
+    UploadIndexTexture(g_renderer.baseTexture, g_renderer.frameWidth,
+                       g_renderer.frameHeight, pixels);
     g_renderer.gl.ActiveTexture(GL_TEXTURE1);
     UploadPaletteTexture(palette);
     if (drawSprites) {
+        /* A frame with margins is always a whole-buffer copy. */
+        mask = g_renderer.viewMask;
+        if (g_renderer.frameWidth != SDL_PORT_FRAME_WIDTH ||
+            g_renderer.frameHeight != SDL_PORT_FRAME_HEIGHT) {
+            memset(g_renderer.wideViewMask, 0xff,
+                   (size_t)g_renderer.frameWidth * g_renderer.frameHeight);
+            mask = g_renderer.wideViewMask;
+        }
         g_renderer.gl.ActiveTexture(GL_TEXTURE3);
-        UploadIndexTexture(g_renderer.maskTexture, SDL_PORT_FRAME_WIDTH,
-                           SDL_PORT_FRAME_HEIGHT, g_renderer.viewMask);
+        UploadIndexTexture(g_renderer.maskTexture, g_renderer.frameWidth,
+                           g_renderer.frameHeight, mask);
     }
     g_renderer.gl.Viewport(0, 0, drawableWidth, drawableHeight);
     g_renderer.gl.ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -1236,7 +1287,7 @@ static int RenderGlFrame(const unsigned char *pixels,
     g_renderer.gl.BindVertexArray(g_renderer.vertexArray);
     DrawBaseFrame();
     if (drawSprites)
-        DrawRecordedSprites((float)viewportWidth / SDL_PORT_FRAME_WIDTH,
+        DrawRecordedSprites((float)viewportWidth / g_renderer.frameWidth,
                             viewportLeft, viewportBottom, viewportWidth,
                             viewportHeight);
     SDL_GL_SwapWindow(g_renderer.window);
@@ -1471,7 +1522,8 @@ void SdlGlRendererShutdown(void)
 
 void SdlGlRendererBeginSpaceFrame(const ScreenViewportGeometry *geometry,
                                      int viewportMode, int fullViewportCopy,
-                                     unsigned char spaceClearColour)
+                                     unsigned char spaceClearColour,
+                                     int marginX, int marginY)
 {
     ResetRecordedSprites();
     if (g_renderer.atlasResetPending)
@@ -1481,8 +1533,12 @@ void SdlGlRendererBeginSpaceFrame(const ScreenViewportGeometry *geometry,
     g_renderer.frameState =
         g_renderer.context != 0 ? GL_RENDERER_FRAME_RECORDING : GL_RENDERER_FRAME_IDLE;
     g_renderer.spaceClearColour = spaceClearColour;
-    g_renderer.spaceLayerOffsetX = 0;
-    g_renderer.spaceLayerOffsetY = 0;
+    /* With --aspectless margins the frame is the whole space buffer, whose
+       top left corner is game coordinate (-marginX, -marginY). */
+    g_renderer.spaceLayerOffsetX = marginX;
+    g_renderer.spaceLayerOffsetY = marginY;
+    g_renderer.recordedFrameWidth = SDL_PORT_FRAME_WIDTH + 2 * marginX;
+    g_renderer.recordedFrameHeight = SDL_PORT_FRAME_HEIGHT + 2 * marginY;
     if (g_renderer.frameState == GL_RENDERER_FRAME_RECORDING) {
         if (!fullViewportCopy && viewportMode != 5 && geometry != 0) {
             g_renderer.spaceLayerOffsetX = geometry->originX;

@@ -5,8 +5,9 @@
 static SDL_Renderer *g_pSdlRenderer;
 static unsigned int g_dwSdlStaticNoiseSeed = 0x1f123bb5U;
 static SDL_Texture *g_pSdlFrameTexture;
-static Uint32 g_adwSdlFramePixels[
-    SDL_PORT_FRAME_WIDTH * SDL_PORT_FRAME_HEIGHT];
+static int g_nSdlFrameTextureWidth;
+static int g_nSdlFrameTextureHeight;
+static Uint32 g_adwSdlFramePixels[SDL_PORT_FRAME_MAX_PIXELS];
 
 /* EGA compatibility filter (--ega).  Static disassembly of data/dos/WC.EXE
  * shows that graphics selector 1 rewrites resource extensions from .V* to .E*
@@ -59,6 +60,13 @@ int SdlEgaDitherEnabled(void)
     return g_bEgaDitherEnabled;
 }
 
+unsigned char SdlEgaDitherIndex(unsigned char colour, int odd)
+{
+    unsigned char packed = g_abEgaDitherTable[colour];
+
+    return odd ? (packed >> 4) : (packed & 0x0f);
+}
+
 void SdlEnableEgaDither(void)
 {
     int index;
@@ -76,6 +84,21 @@ void SdlEnableEgaDither(void)
     }
 }
 
+static int SdlEnsureFrameTexture(int width, int height)
+{
+    if (g_pSdlFrameTexture != 0 && g_nSdlFrameTextureWidth == width &&
+        g_nSdlFrameTextureHeight == height)
+        return 1;
+    if (g_pSdlFrameTexture != 0)
+        SDL_DestroyTexture(g_pSdlFrameTexture);
+    g_pSdlFrameTexture =
+        SDL_CreateTexture(g_pSdlRenderer, SDL_PIXELFORMAT_ARGB8888,
+                          SDL_TEXTUREACCESS_STREAMING, width, height);
+    g_nSdlFrameTextureWidth = width;
+    g_nSdlFrameTextureHeight = height;
+    return g_pSdlFrameTexture != 0;
+}
+
 int SdlInitializeVideo(SDL_Window *window)
 {
     SdlShutdownVideo();
@@ -91,12 +114,8 @@ int SdlInitializeVideo(SDL_Window *window)
             SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
     if (g_pSdlRenderer == 0)
         return 0;
-    g_pSdlFrameTexture =
-        SDL_CreateTexture(g_pSdlRenderer, SDL_PIXELFORMAT_ARGB8888,
-                          SDL_TEXTUREACCESS_STREAMING,
-                          SDL_PORT_FRAME_WIDTH,
-                          SDL_PORT_FRAME_HEIGHT);
-    if (g_pSdlFrameTexture == 0) {
+    if (!SdlEnsureFrameTexture(SDL_PORT_FRAME_WIDTH,
+                               SDL_PORT_FRAME_HEIGHT)) {
         SdlShutdownVideo();
         return 0;
     }
@@ -138,6 +157,8 @@ int SdlPresentIndexedFrame(const unsigned char *pixels,
                               const unsigned char *palette)
 {
     SDL_Rect dest;
+    int frameHeight;
+    int frameWidth;
     int pixel;
 
     if (g_bEgaDitherEnabled && pixels != 0) {
@@ -157,10 +178,14 @@ int SdlPresentIndexedFrame(const unsigned char *pixels,
     if (SdlUsingGlRenderer())
         return SdlGlRendererPresent(pixels, palette);
     if (g_pSdlRenderer == 0 || g_pSdlFrameTexture == 0 || pixels == 0 ||
-        palette == 0 || !SdlComputeFrameDestRect(&dest))
+        palette == 0)
+        return 0;
+    pixels = SdlComposeFrame(pixels, &frameWidth, &frameHeight);
+    if (!SdlEnsureFrameTexture(frameWidth, frameHeight) ||
+        !SdlComputeFrameDestRect(&dest))
         return 0;
     pixel = 0;
-    while (pixel < SDL_PORT_FRAME_WIDTH * SDL_PORT_FRAME_HEIGHT) {
+    while (pixel < frameWidth * frameHeight) {
         int paletteOffset;
         unsigned char colour;
 
@@ -174,8 +199,7 @@ int SdlPresentIndexedFrame(const unsigned char *pixels,
         pixel++;
     }
     if (SDL_UpdateTexture(g_pSdlFrameTexture, 0, g_adwSdlFramePixels,
-                          SDL_PORT_FRAME_WIDTH *
-                              (int)sizeof(Uint32)) != 0)
+                          frameWidth * (int)sizeof(Uint32)) != 0)
         return 0;
     if (SDL_RenderClear(g_pSdlRenderer) != 0)
         return 0;
@@ -210,14 +234,20 @@ void SdlBeginSpaceFrame(
     const struct ScreenViewportGeometry *geometry, int viewportMode,
     int fullViewportCopy, unsigned char clearColour)
 {
+    int marginX;
+    int marginY;
+
+    SdlAspectlessBeginSpaceFrame(fullViewportCopy, &marginX, &marginY);
     if (SdlUsingGlRenderer()) {
         SdlGlRendererBeginSpaceFrame(
-            geometry, viewportMode, fullViewportCopy, clearColour);
+            geometry, viewportMode, fullViewportCopy, clearColour, marginX,
+            marginY);
     }
 }
 
 void SdlCompleteSpaceFrame(void)
 {
+    SdlAspectlessCompleteSpaceFrame();
     if (SdlUsingGlRenderer())
         SdlGlRendererCompleteSpaceFrame();
 }
@@ -226,6 +256,7 @@ void SdlCancelSpaceFrame(void)
 {
     /* RunSpaceFlight calls this when the spaceflight session ends. */
     SdlEndJoystickSpaceflight();
+    SdlAspectlessCancelSpaceFrame();
     if (SdlUsingGlRenderer())
         SdlGlRendererCancelSpaceFrame();
 }

@@ -5,6 +5,11 @@
 
 #define SDL_PORT_FRAME_WIDTH 320
 #define SDL_PORT_FRAME_HEIGHT 200
+/* --aspectless adds margins around the frame, on two opposite sides only. */
+#define SDL_PORT_FRAME_MAX_WIDTH 864
+#define SDL_PORT_FRAME_MAX_HEIGHT 480
+#define SDL_PORT_FRAME_MAX_PIXELS \
+    (SDL_PORT_FRAME_MAX_WIDTH * SDL_PORT_FRAME_HEIGHT)
 #define SDL_PORT_DISPLAY_ASPECT_WIDTH 4
 #define SDL_PORT_DISPLAY_ASPECT_HEIGHT 3
 
@@ -17,6 +22,14 @@ void SdlSetVideoBackend(SdlVideoBackend backend);
 int SdlUsingGlRenderer(void);
 void SdlEnableEgaDither(void);
 int SdlEgaDitherEnabled(void);
+unsigned char SdlEgaDitherIndex(unsigned char colour, int odd);
+void SdlGetFrameGeometry(int *width, int *height, int *marginX, int *marginY);
+const unsigned char *SdlComposeFrame(const unsigned char *screen, int *width,
+                                     int *height);
+int SdlAspectlessBeginSpaceFrame(int fullViewportCopy, int *marginX,
+                                 int *marginY);
+void SdlAspectlessCompleteSpaceFrame(void);
+void SdlAspectlessCancelSpaceFrame(void);
 int SdlShip3dUsesGl(void);
 int SdlGlRendererRecordShip(const struct Viewport *viewport,
                                const float *points, int count,
@@ -40,7 +53,8 @@ int SdlGlRendererPresent(const unsigned char *pixels,
 void SdlGlRendererWaitForVerticalBlank(void);
 void SdlGlRendererBeginSpaceFrame(
     const struct ScreenViewportGeometry *geometry, int viewportMode,
-    int fullViewportCopy, unsigned char clearColour);
+    int fullViewportCopy, unsigned char clearColour, int marginX,
+    int marginY);
 void SdlGlRendererCompleteSpaceFrame(void);
 void SdlGlRendererCancelSpaceFrame(void);
 int SdlGlRendererRecordSpaceSprite(const struct Viewport *viewport, float x,

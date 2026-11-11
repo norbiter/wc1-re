@@ -827,6 +827,12 @@ unsigned short __stdcall AllocateViewport(Viewport *viewport,
     unsigned short row;
     short offset;
     int rowCount;
+#ifdef SDL_PORT
+    int marginX;
+    int marginY;
+    int marginRow;
+    int stride;
+#endif
 
     top = viewport->top;
     height = viewport->bottom - top + 1;
@@ -835,14 +841,41 @@ unsigned short __stdcall AllocateViewport(Viewport *viewport,
     nAllocateViewportCallsValue++;
     if (nVideoMode != 0x13)
         LogDisplayMode("not MCGA");
+#ifdef SDL_PORT
+    SdlAspectlessGetAllocationMargins(viewport, &marginX, &marginY);
+    stride = width + 2 * marginX;
+    viewport->allocation = AllocateTaggedMemory(
+        (unsigned int)stride * (height + 2 * marginY), (flags + 2));
+#else
     viewport->allocation = AllocateTaggedMemory(
         (unsigned int)width * height, (flags + 2));
+#endif
     apViewportAllocations[
         nViewAllocTotal++] = viewport->allocation;
     if (viewport->allocation == 0)
         return 0;
     viewport->pixels = viewport->allocation;
 
+#ifdef SDL_PORT
+    /* The table covers rows -marginY .. top + height + marginY + 1, with
+     * column 0 of row `top` at marginX bytes into buffer row marginY. */
+    (void)offset;
+    (void)rowCount;
+    (void)row;
+    viewport->rowOffsets = AllocateTaggedMemory(
+        (top + (unsigned int)height + 2 * marginY + 2) * sizeof(int), 0);
+    if (viewport->rowOffsets == 0) {
+        if (nVideoMode != 0x13)
+            ReleasePacketHandle(viewport->allocation);
+        return 0;
+    }
+    viewport->rowOffsets += marginY;
+    for (marginRow = -marginY; marginRow < height + marginY + 2; marginRow++)
+        viewport->rowOffsets[top + marginRow] =
+            (marginRow + marginY) * stride + marginX - left;
+    if (marginX != 0 || marginY != 0)
+        SdlAspectlessAdoptSpaceBuffer(viewport, marginX, marginY);
+#else
     offset = 0;
     viewport->rowOffsets = AllocateTaggedMemory(
         (top + (unsigned int)height) * sizeof(unsigned short) + 4,
@@ -858,6 +891,7 @@ unsigned short __stdcall AllocateViewport(Viewport *viewport,
         viewport->rowOffsets[top + row] = offset - left;
         offset += width;
     }
+#endif
     if (clearColour != -1)
         ClearViewport(viewport, clearColour);
     return 1;

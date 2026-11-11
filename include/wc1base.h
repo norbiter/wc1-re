@@ -92,7 +92,13 @@ struct IxSound {
  * offsets are fixed by the accesses in the 0x00440C00-0x00441A8F block. */
 typedef struct Viewport {
     unsigned char *pixels;          /* +0x00 */
+#ifdef SDL_PORT
+    /* Wider than the original so a viewport may exceed 65535 bytes: the
+     * --aspectless space buffer does. */
+    int *rowOffsets;                /* +0x04 */
+#else
     unsigned short *rowOffsets;     /* +0x04 */
+#endif
     short left;                     /* +0x08 */
     short top;                      /* +0x0A */
     short right;                    /* +0x0C */

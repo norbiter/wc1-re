@@ -78,6 +78,8 @@ static void SdlPrintUsage(FILE *stream)
           "  --sturdy-friends        Double shields on friendly transports and capitals\n"
           "  --low-missile           Cap Kilrathi ships at one missile per type\n"
           "  --fair-asteroids        No asteroids spawned on an intercept course\n"
+          "  --aspectless            Cockpit-less flight fills a fullscreen display\n"
+          "                          of any aspect ratio\n"
           "  --mission-menu          Enable the mission menu\n"
           "  --cheats                Enable cheat mode\n"
           "  --joystick-debug        Log joystick input\n"
@@ -200,6 +202,8 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlLowMissileEnable();
         } else if (strcmp(argument, "--fair-asteroids") == 0) {
             SdlFairAsteroidsEnable();
+        } else if (strcmp(argument, "--aspectless") == 0) {
+            SdlAspectlessEnable();
         } else if (strcmp(argument, "--mission-menu") == 0) {
             SdlMissionMenuEnable();
         } else if (strcmp(argument, "--cheats") == 0) {

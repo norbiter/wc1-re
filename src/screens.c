@@ -1584,7 +1584,11 @@ unsigned int DrawFuneralLongShot(short shot, char *text, short duration)
 void ShowOffscreenBuffer(void)
 {
     unsigned short pixels;
+#ifdef SDL_PORT
+    int *rowOffsets;
+#else
     unsigned short *rowOffsets;
+#endif
 
     switch (nVideoMode) {
     case 4:

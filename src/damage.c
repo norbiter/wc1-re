@@ -49,7 +49,11 @@ int aiPktHandleDeltas[0x1000]; /* 0x005a2530 */
 int nPacketHandleTotal; /* 0x005a6530 */
 Viewport *pAllocatedScreenViewport; /* 0x005a6534 */
 Viewport *pFullScreenRecord; /* 0x005a6538 */
+#ifdef SDL_PORT
+int awScreenRowOffsets[202]; /* 0x005a6540 */
+#else
 unsigned short awScreenRowOffsets[202]; /* 0x005a6540 */
+#endif
 ScreenAllocation stCurrentScreenAlloc; /* 0x005a66e0 */
 
 /* Function start: 0x42C800 */

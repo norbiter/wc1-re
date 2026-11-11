@@ -2306,7 +2306,11 @@ void draw_nav_pointer(void)
     if (asObjectCollisionRadius[EYE_OBJECT] * 0x100 >
         viewPosition.z)
         return;
+#ifdef SDL_PORT
+    if (DivideFixed(viewPosition.z, distance) < SdlAspectlessViewCone())
+#else
     if (DivideFixed(viewPosition.z, distance) < 0x94)
+#endif
         return;
     asObjectScreenXList[nNavPointerObject] = (DivideFixed(
         MultiplyFixed(

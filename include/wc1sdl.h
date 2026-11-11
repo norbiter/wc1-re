@@ -295,6 +295,15 @@ int SdlAiThrottleDefers(short obj);
 void SdlNoFriendlyFireEnable(void);
 int SdlNoFriendlyFireSpares(short attacker, short victim);
 int SdlNoFriendlyFireBlocks(short obj, short partner);
+void SdlAspectlessEnable(void);
+void SdlAspectlessGetAllocationMargins(const struct Viewport *viewport,
+                                       int *marginX, int *marginY);
+void SdlAspectlessAdoptSpaceBuffer(const struct Viewport *viewport,
+                                   int marginX, int marginY);
+int *SdlAspectlessReleaseRows(int *rowOffsets);
+int SdlAspectlessClearSpaceBuffer(const struct Viewport *viewport,
+                                  short colour);
+int SdlAspectlessViewCone(void);
 void SdlFairAsteroidsEnable(void);
 int SdlFairAsteroidsEnabled(void);
 void SdlLowMissileEnable(void);

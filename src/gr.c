@@ -623,7 +623,11 @@ void DrawFontGlyph(char character, TextContext *context, int height,
                 }
 #endif
                 if (viewport->top == row) {
+#ifdef SDL_PORT
+                    if (viewport->rowOffsets[row] < 0)
+#else
                     if ((viewport->rowOffsets[row] & 0x8000) != 0)
+#endif
                         destination = context->cursorX + viewport->pixels;
                     else
                         destination = viewport->rowOffsets[row] +
@@ -654,7 +658,11 @@ void DrawFontGlyph(char character, TextContext *context, int height,
 #endif
 
                 if (isTopRow) {
+#ifdef SDL_PORT
+                    if (viewport->rowOffsets[row] < 0)
+#else
                     if ((viewport->rowOffsets[row] & 0x8000) != 0)
+#endif
                         translatedDestination =
                             context->cursorX + viewport->pixels;
                     else
@@ -1056,7 +1064,12 @@ void CopyViewportContents(Viewport *source, Viewport *destination)
 /* Function start: 0x441AE0 */
 void ClearViewport(Viewport *viewport, short colour)
 {
+#ifdef SDL_PORT
+    if (viewport->pixels != 0 && viewport->rowOffsets != 0 &&
+        !SdlAspectlessClearSpaceBuffer(viewport, colour)) {
+#else
     if (viewport->pixels != 0 && viewport->rowOffsets != 0) {
+#endif
         ClipViewportToScreen(viewport);
         FillRasterClip(&stRasterClip, colour);
     }

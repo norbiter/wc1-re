@@ -56,6 +56,11 @@ void SdlCalculateOutputViewport(int width, int height, int *left,
                                    int *bottom, int *viewportWidth,
                                    int *viewportHeight)
 {
+    Sint64 aspectWidth;
+    Sint64 aspectHeight;
+    int frameWidth;
+    int frameHeight;
+
     if (width < 1 || height < 1) {
         *left = 0;
         *bottom = 0;
@@ -64,18 +69,28 @@ void SdlCalculateOutputViewport(int width, int height, int *left,
         return;
     }
 
-    /* Mode 13h artwork is composed for a 4:3 display. */
-    if ((Sint64)width * SDL_PORT_DISPLAY_ASPECT_HEIGHT >
-        (Sint64)height * SDL_PORT_DISPLAY_ASPECT_WIDTH) {
+    /* Mode 13h artwork is composed for a 4:3 display, so its pixels are
+     * 5:6.  An --aspectless frame has more of the same pixels. */
+    SdlGetFrameGeometry(&frameWidth, &frameHeight, 0, 0);
+    aspectWidth = (Sint64)frameWidth * SDL_PORT_DISPLAY_ASPECT_WIDTH *
+                  SDL_PORT_FRAME_HEIGHT;
+    aspectHeight = (Sint64)frameHeight * SDL_PORT_DISPLAY_ASPECT_HEIGHT *
+                   SDL_PORT_FRAME_WIDTH;
+    if ((Sint64)width * aspectHeight > (Sint64)height * aspectWidth) {
         *viewportHeight = height;
-        *viewportWidth =
-            ((Sint64)height * SDL_PORT_DISPLAY_ASPECT_WIDTH /
-                  SDL_PORT_DISPLAY_ASPECT_HEIGHT);
+        *viewportWidth = (int)((Sint64)height * aspectWidth / aspectHeight);
     } else {
         *viewportWidth = width;
-        *viewportHeight =
-            ((Sint64)width * SDL_PORT_DISPLAY_ASPECT_HEIGHT /
-                  SDL_PORT_DISPLAY_ASPECT_WIDTH);
+        *viewportHeight = (int)((Sint64)width * aspectHeight / aspectWidth);
+    }
+    /* An --aspectless frame was sized for this display to the nearest
+     * pixel pair; fill the display rather than leave a sliver. */
+    if ((frameWidth != SDL_PORT_FRAME_WIDTH ||
+         frameHeight != SDL_PORT_FRAME_HEIGHT) &&
+        (Sint64)*viewportWidth * 100 >= (Sint64)width * 98 &&
+        (Sint64)*viewportHeight * 100 >= (Sint64)height * 98) {
+        *viewportWidth = width;
+        *viewportHeight = height;
     }
     if (*viewportWidth < 1)
         *viewportWidth = 1;
@@ -117,6 +132,10 @@ static int SdlScaleCoordinate(int coordinate, int sourceExtent,
 int SdlMapLogicalToWindow(SDL_Window *window, int logicalX, int logicalY,
                              int *windowX, int *windowY)
 {
+    int frameHeight;
+    int frameWidth;
+    int marginX;
+    int marginY;
     int viewportHeight;
     int viewportLeft;
     int viewportTop;
@@ -127,11 +146,12 @@ int SdlMapLogicalToWindow(SDL_Window *window, int logicalX, int logicalY,
     if (!SdlGetWindowViewport(window, &viewportLeft, &viewportTop,
                                  &viewportWidth, &viewportHeight))
         return 0;
+    SdlGetFrameGeometry(&frameWidth, &frameHeight, &marginX, &marginY);
     *windowX = viewportLeft +
-               SdlScaleCoordinate(logicalX, SDL_PORT_FRAME_WIDTH,
+               SdlScaleCoordinate(logicalX + marginX, frameWidth,
                                       viewportWidth);
     *windowY = viewportTop +
-               SdlScaleCoordinate(logicalY, SDL_PORT_FRAME_HEIGHT,
+               SdlScaleCoordinate(logicalY + marginY, frameHeight,
                                       viewportHeight);
     return 1;
 }
@@ -139,6 +159,10 @@ int SdlMapLogicalToWindow(SDL_Window *window, int logicalX, int logicalY,
 int SdlMapWindowToLogical(SDL_Window *window, int windowX, int windowY,
                              int *logicalX, int *logicalY)
 {
+    int frameHeight;
+    int frameWidth;
+    int marginX;
+    int marginY;
     int viewportHeight;
     int viewportLeft;
     int viewportTop;
@@ -149,9 +173,10 @@ int SdlMapWindowToLogical(SDL_Window *window, int windowX, int windowY,
     if (!SdlGetWindowViewport(window, &viewportLeft, &viewportTop,
                                  &viewportWidth, &viewportHeight))
         return 0;
+    SdlGetFrameGeometry(&frameWidth, &frameHeight, &marginX, &marginY);
     *logicalX = SdlScaleCoordinate(windowX - viewportLeft, viewportWidth,
-                                      SDL_PORT_FRAME_WIDTH);
+                                      frameWidth) - marginX;
     *logicalY = SdlScaleCoordinate(windowY - viewportTop, viewportHeight,
-                                      SDL_PORT_FRAME_HEIGHT);
+                                      frameHeight) - marginY;
     return 1;
 }

@@ -485,7 +485,11 @@ extern int nPacketHandleTotal; /* 0x005a6530 */
 #endif
 extern Viewport *pAllocatedScreenViewport; /* 0x005a6534 */
 #ifndef WC1_LOGIC_SOURCE
+#ifdef SDL_PORT
+extern int awScreenRowOffsets[202]; /* 0x005a6540 */
+#else
 extern unsigned short awScreenRowOffsets[202]; /* 0x005a6540 */
+#endif
 extern ScreenAllocation stCurrentScreenAlloc; /* 0x005a66e0 */
 extern ScreenAllocation *pScreenAllocPtr; /* 0x005a66ec */
 #endif
