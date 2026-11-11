@@ -1,0 +1,542 @@
+<!doctype html>
+<!-- Fork-only: interactive tuner for the ship3d lighting constants.
+
+     It loads a ship's PLY, .light sidecar and GAME.PAL and shades the points
+     with a JavaScript copy of src/sdl/ship3d.c (rim, Fresnel, light vector)
+     and src/sdl/hullfield.c (the ambient-occlusion probe).  Keep the two in
+     step if the C changes.
+
+     Serve the repository root and open the page:
+
+         python3 -m http.server 8000 --bind 127.0.0.1
+         open http://127.0.0.1:8000/bin/ship3dTune.html
+
+     Drag to rotate, wheel to zoom.  "Copy #defines" copies the constants in
+     the form ship3d.c uses. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ship3d Light Tuner</title>
+<style>
+  :root { --bg: #000; --panel: #15171c; --fg: #d8dbe2; --dim: #8a90a0; --accent: #6cb4ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 13px/1.35 ui-monospace, Menlo, Consolas, monospace; }
+  #wrap { display: flex; height: 100%; }
+  #view { flex: 1; position: relative; min-width: 0; }
+  canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+  #stats { position: absolute; left: 10px; bottom: 8px; color: var(--dim); white-space: pre; pointer-events: none; }
+  #panel { width: 320px; overflow-y: auto; background: var(--panel); padding: 12px 14px; border-left: 1px solid #262a33; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 14px 0 6px; }
+  h2:first-child { margin-top: 0; }
+  .row { display: grid; grid-template-columns: 92px 1fr 52px; gap: 6px; align-items: center; margin: 3px 0; }
+  .row input[type=range] { width: 100%; }
+  .row output { text-align: right; color: var(--accent); }
+  select, button { font: inherit; background: #222631; color: var(--fg); border: 1px solid #343a48; border-radius: 4px; padding: 3px 6px; }
+  button { cursor: pointer; }
+  label.chk { display: block; margin: 4px 0; }
+  .btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  pre#defs { background: #0d0f13; padding: 8px; border-radius: 4px; white-space: pre-wrap; font-size: 11px; color: #b8c4d8; }
+  .note { color: var(--dim); font-size: 11px; }
+  @media (max-width: 700px) { #wrap { flex-direction: column; } #panel { width: 100%; height: 45%; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="view"><canvas id="gl"></canvas><div id="stats">loading…</div></div>
+  <div id="panel">
+    <h2>Model</h2>
+    <div class="row"><span>ship</span><select id="ship" style="grid-column: span 2"></select></div>
+    <div class="row"><span>mode</span><select id="mode" style="grid-column: span 2">
+      <option value="blend">GL palette blend</option>
+      <option value="true">GL true colour</option>
+      <option value="8bit">8-bit frame</option>
+    </select></div>
+    <div class="row"><span>show</span><select id="term" style="grid-column: span 2">
+      <option value="final">final colour</option>
+      <option value="facing">facing (0..1, red = clamped)</option>
+      <option value="ao">AO brightness</option>
+      <option value="edge">rim + Fresnel</option>
+    </select></div>
+
+    <h2>Ambient occlusion</h2>
+    <div id="sliders-ao"></div>
+    <h2>Rim light</h2>
+    <div id="sliders-rim"></div>
+    <h2>Fresnel</h2>
+    <div id="sliders-fresnel"></div>
+    <h2>Key light (camera space, toward light)</h2>
+    <div id="sliders-light"></div>
+    <h2>Beyond the game</h2>
+    <div id="sliders-extra"></div>
+    <label class="chk"><input type="checkbox" id="noclamp"> don't clamp facing at 1 (true colour only)</label>
+    <p class="note">The game uses intensity 1 and clamps facing at 1. Palette modes can't go past n·L = 1 (the shade table ends there).</p>
+
+    <h2>View</h2>
+    <label class="chk"><input type="checkbox" id="spin" checked> auto-spin</label>
+    <div id="sliders-view"></div>
+    <div class="btns">
+      <button id="reset">Reset to ship3d.c</button>
+      <button id="copy">Copy #defines</button>
+    </div>
+    <pre id="defs"></pre>
+  </div>
+</div>
+<script>
+"use strict";
+
+// ---- parameters (defaults = src/sdl/ship3d.c) ---------------------------
+const DEFAULTS = {
+  aoStrength: 0.2, rimStrength: 0.3, rimPower: 2.0, fresnelStrength: 0.6,
+  lightX: -0.40, lightY: -0.55, lightZ: -0.73,
+  intensity: 1.0, cull: 0.35, footprint: 1.5, zoom: 1.0,
+};
+const SLIDERS = {
+  "sliders-ao": [["aoStrength", "strength", 0, 1, 0.01]],
+  "sliders-rim": [["rimStrength", "strength", 0, 1.5, 0.01], ["rimPower", "power", 0.25, 8, 0.05]],
+  "sliders-fresnel": [["fresnelStrength", "strength", 0, 1.5, 0.01]],
+  "sliders-light": [["lightX", "x (right)", -1, 1, 0.01], ["lightY", "y (down)", -1, 1, 0.01], ["lightZ", "z (fwd)", -1, 1, 0.01]],
+  "sliders-extra": [["intensity", "intensity", 0, 6, 0.05]],
+  "sliders-view": [["zoom", "zoom", 0.3, 6, 0.01], ["footprint", "footprint", 0.5, 3, 0.05], ["cull", "cull n.z >", -0.2, 1, 0.01]],
+};
+const P = Object.assign({}, DEFAULTS);
+let dirty = true;
+
+function buildSliders() {
+  for (const [id, list] of Object.entries(SLIDERS)) {
+    const host = document.getElementById(id);
+    for (const [key, label, min, max, step] of list) {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML = `<span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}"><output></output>`;
+      const input = row.querySelector("input"), out = row.querySelector("output");
+      input.value = P[key];
+      out.textContent = (+P[key]).toFixed(2);
+      input.addEventListener("input", () => {
+        P[key] = +input.value; out.textContent = P[key].toFixed(2); dirty = true; updateDefs();
+      });
+      input.dataset.key = key;
+      host.appendChild(row);
+    }
+  }
+}
+function syncSliders() {
+  document.querySelectorAll("input[type=range]").forEach(i => {
+    i.value = P[i.dataset.key]; i.nextElementSibling.textContent = (+P[i.dataset.key]).toFixed(2);
+  });
+}
+function f(v) { let s = (+v).toFixed(2).replace(/0$/, ""); if (s.endsWith(".")) s += "0"; return s + "f"; }
+function updateDefs() {
+  document.getElementById("defs").textContent =
+`#define SHIP3D_AO_STRENGTH ${f(P.aoStrength)}
+#define SHIP3D_RIM_STRENGTH ${f(P.rimStrength)}
+#define SHIP3D_RIM_POWER ${f(P.rimPower)}
+#define SHIP3D_FRESNEL_STRENGTH ${f(P.fresnelStrength)}
+
+    lightX = ${f(P.lightX)};
+    lightY = ${f(P.lightY)};
+    lightZ = ${f(P.lightZ)};`;
+}
+
+// ---- file loading -------------------------------------------------------
+async function fetchBytes(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
+  return new DataView(await r.arrayBuffer());
+}
+async function loadPalette() {
+  const d = await fetchBytes("../data/full/GAMEDAT/GAME.PAL");
+  const bytes = new Uint8Array(d.buffer);
+  for (let i = 0; i + 8 < bytes.length; i++) {
+    if (bytes[i] === 0x43 && bytes[i + 1] === 0x4d && bytes[i + 2] === 0x41 && bytes[i + 3] === 0x50) {
+      const pal = new Float32Array(768);
+      for (let j = 0; j < 768; j++) pal[j] = bytes[i + 8 + j] / 255;
+      return pal;
+    }
+  }
+  throw new Error("GAME.PAL has no CMAP chunk");
+}
+async function listShips() {
+  try {
+    const html = await (await fetch("../ship3d/")).text();
+    const names = [...html.matchAll(/href="([^"]+)\.light"/g)].map(m => decodeURIComponent(m[1]));
+    if (names.length) return [...new Set(names)].sort();
+  } catch (e) { /* fall through */ }
+  return ["SHIP_V04"];
+}
+async function loadShip(name) {
+  const ply = await fetchBytes(`../ship3d/${name}.ply`);
+  const bytes = new Uint8Array(ply.buffer);
+  const head = new TextDecoder("latin1").decode(bytes.subarray(0, Math.min(4096, bytes.length)));
+  const end = head.indexOf("end_header\n") + 11;
+  const count = +head.match(/element vertex (\d+)/)[1];
+  const pts = new Float32Array(count * 6), stored = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const o = end + 28 * i;
+    for (let k = 0; k < 6; k++) pts[i * 6 + k] = ply.getFloat32(o + 4 * k, true);
+    for (let k = 0; k < 3; k++) stored[i * 3 + k] = bytes[o + 24 + k] / 255;
+  }
+  const lt = await fetchBytes(`../ship3d/${name}.light`);
+  const version = lt.getUint32(4, true), n = lt.getUint32(8, true), steps = lt.getUint32(12, true);
+  if (n !== count) throw new Error(`${name}: light has ${n} points, PLY ${count}`);
+  const header = version === 3 ? 24 : 16;
+  const shade = new Uint8Array(lt.buffer, header, n * steps);
+  let albedo = null, unlit = null, kappa = 0, reference = 0;
+  if (version === 3) {
+    kappa = lt.getFloat32(16, true); reference = lt.getFloat32(20, true);
+    albedo = new Float32Array(n * 3); unlit = new Uint8Array(n);
+    const base = header + n * steps;
+    for (let i = 0; i < n; i++) {
+      if (lt.getFloat32(base + i * 12, true) < 0) {
+        unlit[i] = 1;
+        for (let c = 0; c < 3; c++) albedo[i * 3 + c] = stored[i * 3 + c];
+      } else {
+        for (let c = 0; c < 3; c++) albedo[i * 3 + c] = lt.getFloat32(base + i * 12 + c * 4, true) / 255;
+      }
+    }
+  }
+  const t0 = performance.now();
+  const occlusion = computeOcclusion(pts, count);
+  const aoMs = performance.now() - t0;
+  let radius = 0;
+  for (let i = 0; i < count; i++) radius = Math.max(radius, Math.hypot(pts[i * 6], pts[i * 6 + 1], pts[i * 6 + 2]));
+  return { name, count, pts, steps, shade, albedo, unlit, kappa, reference, occlusion, radius, aoMs };
+}
+
+// ---- hull field + AO: port of hullfield.c and MeasureShip3dOcclusion ----
+const HULL_BIG = 1e20;
+function transformLine(fv, d, n, v, z) {
+  let k = 0;
+  v[0] = 0; z[0] = -HULL_BIG; z[1] = HULL_BIG;
+  for (let q = 1; q < n; q++) {
+    let s;
+    for (;;) {
+      s = ((fv[q] + q * q) - (fv[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      if (s <= z[k] && k > 0) k--; else break;
+    }
+    k++; v[k] = q; z[k] = s; z[k + 1] = HULL_BIG;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) {
+    while (z[k + 1] < q) k++;
+    const delta = q - v[k];
+    d[q] = delta * delta + fv[v[k]];
+  }
+}
+function buildHullField(pts, count) {
+  const PAD = 6, ACROSS = 128;
+  const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < count; i++)
+    for (let a = 0; a < 3; a++) { const v = pts[i * 6 + a]; if (v < mn[a]) mn[a] = v; if (v > mx[a]) mx[a] = v; }
+  let extent = 0;
+  for (let a = 0; a < 3; a++) extent = Math.max(extent, mx[a] - mn[a]);
+  const cell = Math.max(1, extent / ACROSS);
+  const dims = [0, 1, 2].map(a => Math.ceil((mx[a] - mn[a]) / cell) + 1 + 2 * PAD);
+  const origin = [0, 1, 2].map(a => mn[a] - PAD * cell);
+  const [nx, ny, nz] = dims, total = nx * ny * nz;
+  const state = new Uint8Array(total);
+  for (let i = 0; i < count; i++) {
+    const cx = Math.trunc((pts[i * 6] - origin[0]) / cell);
+    const cy = Math.trunc((pts[i * 6 + 1] - origin[1]) / cell);
+    const cz = Math.trunc((pts[i * 6 + 2] - origin[2]) / cell);
+    state[(cz * ny + cy) * nx + cx] = 1;
+  }
+  const step = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  const queue = new Int32Array(total);
+  let head = 0, tail = 0;
+  state[0] = 2; queue[tail++] = 0;
+  while (head < tail) {
+    const c = queue[head++];
+    const cx = c % nx, cy = Math.trunc(c / nx) % ny, cz = Math.trunc(c / (nx * ny));
+    for (const [dx, dy, dz] of step) {
+      const x = cx + dx, y = cy + dy, z = cz + dz;
+      if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) continue;
+      const nb = (z * ny + y) * nx + x;
+      if (state[nb] !== 0) continue;
+      let near = false;
+      for (const [ox, oy, oz] of step) {
+        const a = x + ox, b = y + oy, e = z + oz;
+        if (a >= 0 && b >= 0 && e >= 0 && a < nx && b < ny && e < nz && state[(e * ny + b) * nx + a] === 1) { near = true; break; }
+      }
+      if (near) continue;
+      state[nb] = 2; queue[tail++] = nb;
+    }
+  }
+  const work = new Float64Array(total);
+  for (let i = 0; i < total; i++) work[i] = state[i] === 1 ? 0 : HULL_BIG;
+  const longest = Math.max(nx, ny, nz);
+  const line = new Float64Array(longest), out = new Float64Array(longest);
+  const v = new Int32Array(longest), zb = new Float64Array(longest + 1);
+  for (let axis = 0; axis < 3; axis++) {
+    const stride = axis === 0 ? 1 : axis === 1 ? nx : nx * ny;
+    const o1 = axis === 0 ? ny : nx, o2 = axis === 2 ? ny : nz;
+    for (let a = 0; a < o1; a++) for (let b = 0; b < o2; b++) {
+      const base = axis === 0 ? (b * ny + a) * nx : axis === 1 ? b * nx * ny + a : b * nx + a;
+      for (let i = 0; i < dims[axis]; i++) line[i] = work[base + i * stride];
+      transformLine(line, out, dims[axis], v, zb);
+      for (let i = 0; i < dims[axis]; i++) work[base + i * stride] = out[i];
+    }
+  }
+  const distance = new Float32Array(total);
+  for (let i = 0; i < total; i++) {
+    const d = Math.sqrt(work[i]) * cell;
+    distance[i] = state[i] === 2 ? d - 0.5 : -d - 0.5;
+  }
+  return { nx, ny, nz, cell, origin, distance };
+}
+function sampleField(F, x, y, z) {
+  const g = [(x - F.origin[0]) / F.cell - 0.5, (y - F.origin[1]) / F.cell - 0.5, (z - F.origin[2]) / F.cell - 0.5];
+  const n = [F.nx, F.ny, F.nz];
+  let outside = 0;
+  for (let a = 0; a < 3; a++) {
+    if (g[a] < 0) { outside += g[a] * g[a]; g[a] = 0; }
+    else if (g[a] > n[a] - 1.001) { const e = g[a] - (n[a] - 1.001); outside += e * e; g[a] = n[a] - 1.001; }
+  }
+  const ix = Math.trunc(g[0]), iy = Math.trunc(g[1]), iz = Math.trunc(g[2]);
+  const fx = g[0] - ix, fy = g[1] - iy, fz = g[2] - iz;
+  const d = F.distance, at = (i, j, k) => d[((iz + k) * F.ny + iy + j) * F.nx + ix + i];
+  const x00 = at(0, 0, 0) + (at(1, 0, 0) - at(0, 0, 0)) * fx;
+  const x10 = at(0, 1, 0) + (at(1, 1, 0) - at(0, 1, 0)) * fx;
+  const x01 = at(0, 0, 1) + (at(1, 0, 1) - at(0, 0, 1)) * fx;
+  const x11 = at(0, 1, 1) + (at(1, 1, 1) - at(0, 1, 1)) * fx;
+  const y0 = x00 + (x10 - x00) * fy, y1 = x01 + (x11 - x01) * fy;
+  return y0 + (y1 - y0) * fz + Math.sqrt(outside) * F.cell;
+}
+// Raw occlusion (0..1) per point; brightness = 1 - strength * raw.
+function computeOcclusion(pts, count) {
+  const F = buildHullField(pts, count);
+  const probeCells = [1.5, 3, 6, 12], probeWeight = [1, 0.8, 0.6, 0.4];
+  const raw = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    const p = [pts[i * 6], pts[i * 6 + 1], pts[i * 6 + 2]], n = [pts[i * 6 + 3], pts[i * 6 + 4], pts[i * 6 + 5]];
+    let t = Math.abs(n[0]) < 0.9 ? [0, n[2], -n[1]] : [-n[2], 0, n[0]];
+    const len = Math.hypot(t[0], t[1], t[2]);
+    if (len <= 0) continue;
+    t = t.map(c => c / len);
+    const b = [n[1] * t[2] - n[2] * t[1], n[2] * t[0] - n[0] * t[2], n[0] * t[1] - n[1] * t[0]];
+    let occ = 0, total = 0;
+    for (let dir = 0; dir < 9; dir++) {
+      const along = dir === 0 ? 1 : 0.643, across = dir === 0 ? 0 : 0.766;
+      const ang = dir * (2 * 3.14159265 / 8), cs = Math.cos(ang) * across, sn = Math.sin(ang) * across;
+      const ray = [0, 1, 2].map(a => n[a] * along + t[a] * cs + b[a] * sn);
+      for (let k = 0; k < 4; k++) {
+        const reach = probeCells[k] * F.cell;
+        const dist = sampleField(F, p[0] + n[0] * 0.5 + ray[0] * reach, p[1] + n[1] * 0.5 + ray[1] * reach, p[2] + n[2] * 0.5 + ray[2] * reach);
+        const open = reach * along;
+        const closed = Math.min(1, Math.max(0, (open - dist) / open));
+        occ += probeWeight[k] * along * closed;
+        total += probeWeight[k] * along;
+      }
+    }
+    raw[i] = total > 0 ? occ / total : 0;
+  }
+  return raw;
+}
+
+// ---- shading: port of ship3d.c ------------------------------------------
+function rim(nx, ny, nz) {
+  let edge = 1 + nz; const facing = (nx + ny + nz) * 0.57735027;
+  if (edge > 1) edge = 1;
+  if (edge <= 0 || facing <= 0) return 0;
+  return P.rimStrength * Math.pow(edge, P.rimPower) * facing;
+}
+function fresnel(nz) {
+  let edge = 1 + nz;
+  if (edge <= 0) return 0;
+  if (edge > 1) edge = 1;
+  const sq = edge * edge;
+  return P.fresnelStrength * sq * sq * edge;
+}
+function run(shade, o, steps, step) {
+  let s = step, e = step;
+  while (s > 0 && shade[o + s - 1] === shade[o + step]) s--;
+  while (e + 1 < steps && shade[o + e + 1] === shade[o + step]) e++;
+  return [s, e];
+}
+function runCentre(shade, o, steps, s, e) {
+  let c = (s + e) * 0.5;
+  if (s === 0 && e + 1 < steps) {
+    const [os, oe] = run(shade, o, steps, e + 1);
+    const pulled = e + 0.5 - (oe - os + 1) * 0.5; if (pulled > c) c = pulled;
+  } else if (e === steps - 1 && s > 0) {
+    const [os, oe] = run(shade, o, steps, s - 1);
+    const pulled = s - 0.5 + (oe - os + 1) * 0.5; if (pulled < c) c = pulled;
+  }
+  return c;
+}
+function blend(shade, o, steps, pos, out) {
+  const step = Math.trunc(pos + 0.5);
+  const [s, e] = run(shade, o, steps, step);
+  const c = runCentre(shade, o, steps, s, e);
+  out[0] = shade[o + step]; out[1] = out[0]; out[2] = 0;
+  if (pos > c && e + 1 < steps) {
+    const [os, oe] = run(shade, o, steps, e + 1);
+    const oc = runCentre(shade, o, steps, os, oe);
+    out[1] = shade[o + e + 1]; out[2] = (pos - c) / (oc - c);
+  } else if (pos < c && s > 0) {
+    const [os, oe] = run(shade, o, steps, s - 1);
+    const oc = runCentre(shade, o, steps, os, oe);
+    out[0] = shade[o + s - 1]; out[1] = shade[o + step]; out[2] = (pos - oc) / (c - oc);
+  }
+  out[2] = Math.min(1, Math.max(0, out[2]));
+}
+
+// ---- view ---------------------------------------------------------------
+// rot: model-axis -> camera rotation (camera x right, y down, z forward).
+// The model frame is nose -z, up +y; the game frame is (x, -y, -z).
+let rot = mul(rotY(-Math.PI / 2 + 0.5), rotX(-0.35));
+function rotX(a) { const c = Math.cos(a), s = Math.sin(a); return [[1, 0, 0], [0, c, -s], [0, s, c]]; }
+function rotY(a) { const c = Math.cos(a), s = Math.sin(a); return [[c, 0, s], [0, 1, 0], [-s, 0, c]]; }
+function mul(A, B) { return A.map((r, i) => [0, 1, 2].map(j => r[0] * B[0][j] + r[1] * B[1][j] + r[2] * B[2][j])); }
+function basis() { const S = [1, -1, -1]; return rot.map(r => r.map((v, j) => v * S[j])); }
+
+const canvas = document.getElementById("gl");
+const gl = canvas.getContext("webgl2", { antialias: false });
+const VS = `#version 300 es
+in vec3 a_pos; in vec3 a_col; uniform vec2 u_size; uniform float u_pt;
+out vec3 v_col;
+void main() {
+  gl_Position = vec4(a_pos.x / u_size.x * 2.0 - 1.0, 1.0 - a_pos.y / u_size.y * 2.0, a_pos.z, 1.0);
+  gl_PointSize = u_pt; v_col = a_col;
+}`;
+const FS = `#version 300 es
+precision highp float; in vec3 v_col; out vec4 o;
+void main() { o = vec4(clamp(v_col, 0.0, 1.0), 1.0); }`;
+function compile(type, src) {
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+const vbo = gl.createBuffer(), vao = gl.createVertexArray();
+gl.bindVertexArray(vao); gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+for (const [name, off] of [["a_pos", 0], ["a_col", 12]]) {
+  const loc = gl.getAttribLocation(prog, name);
+  gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 24, off);
+}
+const uSize = gl.getUniformLocation(prog, "u_size"), uPt = gl.getUniformLocation(prog, "u_pt");
+
+let palette = null, model = null, verts = new Float32Array(0);
+const ui = id => document.getElementById(id);
+
+function frame() {
+  const dpr = window.devicePixelRatio || 1;
+  const W = Math.round(canvas.clientWidth * dpr), H = Math.round(canvas.clientHeight * dpr);
+  if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; dirty = true; }
+  if (ui("spin").checked && !dragging) { rot = mul(rotY(0.006), rot); dirty = true; }
+  if (dirty && model && palette) { dirty = false; draw(W, H); }
+  requestAnimationFrame(frame);
+}
+
+function draw(W, H) {
+  const M = model, B = basis(), mode = ui("mode").value, term = ui("term").value;
+  const trueColour = mode === "true" && M.albedo !== null;
+  const noclamp = ui("noclamp").checked && trueColour;
+  let L = [P.lightX, P.lightY, P.lightZ];
+  const ll = Math.hypot(...L) || 1; L = L.map(v => v / ll);
+  const scale = Math.min(W, H) * 0.42 / M.radius * P.zoom, cx = W / 2, cy = H / 2;
+  if (verts.length < M.count * 6) verts = new Float32Array(M.count * 6);
+  const pal = palette, tmp = [0, 0, 0];
+  let n = 0, saturated = 0, chanClip = 0, white = 0, drawn = 0, maxFacing = 0;
+  for (let i = 0; i < M.count; i++) {
+    const p = M.pts, o = i * 6;
+    const nX = B[0][0] * p[o + 3] + B[0][1] * p[o + 4] + B[0][2] * p[o + 5];
+    const nY = B[1][0] * p[o + 3] + B[1][1] * p[o + 4] + B[1][2] * p[o + 5];
+    const nZ = B[2][0] * p[o + 3] + B[2][1] * p[o + 4] + B[2][2] * p[o + 5];
+    if (nZ > P.cull) continue;
+    drawn++;
+    const X = B[0][0] * p[o] + B[0][1] * p[o + 1] + B[0][2] * p[o + 2];
+    const Y = B[1][0] * p[o] + B[1][1] * p[o + 1] + B[1][2] * p[o + 2];
+    const Z = B[2][0] * p[o] + B[2][1] * p[o + 1] + B[2][2] * p[o + 2];
+    const ao = 1 - P.aoStrength * M.occlusion[i];
+    let facing = Math.max(0, nX * L[0] + nY * L[1] + nZ * L[2]) * P.intensity;
+    if (mode === "8bit") facing *= ao;
+    const edge = rim(nX, nY, nZ) + fresnel(nZ);
+    facing += edge;
+    if (facing > maxFacing) maxFacing = facing;
+    if (facing >= 1) saturated++;
+    if (!noclamp && facing > 1) facing = 1;
+    let r, g, b;
+    if (trueColour) {
+      const a = M.albedo, unlit = M.unlit[i];
+      let lit = 1 + M.kappa * (facing - M.reference);
+      if (lit < 0.05 || unlit) lit = unlit ? 1 : 0.05;
+      r = a[i * 3] * lit * ao; g = a[i * 3 + 1] * lit * ao; b = a[i * 3 + 2] * lit * ao;
+    } else if (mode === "blend") {
+      blend(M.shade, i * M.steps, M.steps, facing * (M.steps - 1), tmp);
+      const lo = tmp[0] * 3, hi = tmp[1] * 3, t = tmp[2];
+      r = (pal[lo] + (pal[hi] - pal[lo]) * t) * ao;
+      g = (pal[lo + 1] + (pal[hi + 1] - pal[lo + 1]) * t) * ao;
+      b = (pal[lo + 2] + (pal[hi + 2] - pal[lo + 2]) * t) * ao;
+    } else {
+      const idx = M.shade[i * M.steps + Math.trunc(facing * (M.steps - 1) + 0.5)] * 3;
+      r = pal[idx]; g = pal[idx + 1]; b = pal[idx + 2];
+    }
+    const mxc = Math.max(r, g, b);
+    if (mxc > 1) chanClip++;
+    if (Math.min(r, g, b) >= 0.98) white++;
+    if (term === "facing") { const v = Math.min(facing, 1); r = g = b = v; if (facing >= 1) { r = 1; g = b = 0.15; } }
+    else if (term === "ao") { r = g = b = ao; }
+    else if (term === "edge") { r = g = b = Math.min(1, edge); }
+    verts[n * 6] = cx + X * scale; verts[n * 6 + 1] = cy + Y * scale;
+    verts[n * 6 + 2] = Math.max(-0.99, Math.min(0.99, Z / (M.radius * 1.05)));
+    verts[n * 6 + 3] = r; verts[n * 6 + 4] = g; verts[n * 6 + 5] = b;
+    n++;
+  }
+  const half = 0.5 * P.footprint * scale * Math.max(
+    Math.abs(B[0][0]) + Math.abs(B[0][1]) + Math.abs(B[0][2]),
+    Math.abs(B[1][0]) + Math.abs(B[1][1]) + Math.abs(B[1][2]));
+  gl.viewport(0, 0, W, H);
+  gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS);
+  gl.useProgram(prog); gl.bindVertexArray(vao); gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, verts.subarray(0, n * 6), gl.DYNAMIC_DRAW);
+  gl.uniform2f(uSize, W, H);
+  gl.uniform1f(uPt, Math.max(1, Math.min(gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1], 2 * half)));
+  gl.drawArrays(gl.POINTS, 0, n);
+  const pct = v => (100 * v / Math.max(1, drawn)).toFixed(1) + "%";
+  ui("stats").textContent =
+    `${M.name}  ${M.count} pts  ${M.albedo ? `kappa ${M.kappa.toFixed(2)} c ${M.reference.toFixed(3)}  ` : ""}AO ${M.aoMs.toFixed(0)} ms\n` +
+    `facing >= 1: ${pct(saturated)}   max facing ${maxFacing.toFixed(2)}   ` +
+    `channel > 1: ${pct(chanClip)}   near-white: ${pct(white)}` +
+    (M.albedo ? `\nmax true-colour gain at facing 1: x${(1 + M.kappa * (1 - M.reference)).toFixed(3)}` : "");
+}
+
+// ---- input --------------------------------------------------------------
+let dragging = false, lastX = 0, lastY = 0;
+canvas.addEventListener("pointerdown", e => { dragging = true; lastX = e.clientX; lastY = e.clientY; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = "grabbing"; });
+canvas.addEventListener("pointerup", () => { dragging = false; canvas.style.cursor = "grab"; });
+canvas.addEventListener("pointermove", e => {
+  if (!dragging) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY; lastX = e.clientX; lastY = e.clientY;
+  rot = mul(rotX(-dy * 0.01), mul(rotY(dx * 0.01), rot)); dirty = true;
+});
+canvas.addEventListener("wheel", e => {
+  e.preventDefault(); P.zoom = Math.min(6, Math.max(0.3, P.zoom * Math.exp(-e.deltaY * 0.001))); syncSliders(); dirty = true;
+}, { passive: false });
+for (const id of ["mode", "term", "noclamp"]) ui(id).addEventListener("change", () => { dirty = true; });
+ui("reset").addEventListener("click", () => { Object.assign(P, DEFAULTS); ui("noclamp").checked = false; syncSliders(); updateDefs(); dirty = true; });
+ui("copy").addEventListener("click", () => navigator.clipboard.writeText(ui("defs").textContent));
+ui("ship").addEventListener("change", async () => {
+  ui("stats").textContent = `loading ${ui("ship").value}…`;
+  try { model = await loadShip(ui("ship").value); dirty = true; } catch (e) { ui("stats").textContent = String(e); }
+});
+
+(async () => {
+  buildSliders(); updateDefs();
+  try {
+    palette = await loadPalette();
+    const ships = await listShips();
+    for (const s of ships) { const o = document.createElement("option"); o.textContent = s; ui("ship").appendChild(o); }
+    ui("ship").value = ships.includes("SHIP_V04") ? "SHIP_V04" : ships[0];
+    model = await loadShip(ui("ship").value);
+  } catch (e) { ui("stats").textContent = String(e) + "\nServe the repository root: python3 -m http.server 8000"; }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

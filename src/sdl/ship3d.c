@@ -63,16 +63,16 @@
  * cells, and how much of the light a fully occluded point loses. */
 #define SHIP3D_AO_DIRECTIONS 9
 #define SHIP3D_AO_PROBES 4
-#define SHIP3D_AO_STRENGTH 0.2f
+#define SHIP3D_AO_STRENGTH 0.41f
 
 /* Edge lighting: the rim light's reach up the shade ramp and how tightly it
  * hugs the silhouette. */
-#define SHIP3D_RIM_STRENGTH 0.3f
-#define SHIP3D_RIM_POWER 2.0f
+#define SHIP3D_RIM_STRENGTH 0.4f
+#define SHIP3D_RIM_POWER 2.85f
 
 /* Fresnel outline: Schlick's (1 - n.v)^5 with no reflectance head-on, scaled
  * to how far up the shade ramp it can move a point seen edge-on. */
-#define SHIP3D_FRESNEL_STRENGTH 0.6f
+#define SHIP3D_FRESNEL_STRENGTH 0.57f
 
 /* Floats per point handed to the GL layer: x, y, depth, low and high palette
  * entries, blend, brightness. */
