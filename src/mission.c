@@ -575,8 +575,18 @@ int set_up_action_sphere(short navPoint)
 #endif
     nCurrentNavigationPoint = navPoint;
     nav = &aMissionNavPoints[navPoint];
+#ifdef SDL_PORT
+    /* The last record (19, the Tiger's Claw escape scene) has no successor.
+     * The original reads one record past the array, landing on the top byte
+     * of aMissionShips[0].position.z, which is never 2 in practice; treat it
+     * as "no wave" instead of reading out of bounds. */
+    nCurrentWave =
+        navPoint + 1 < MISSION_NAV_POINT_COUNT &&
+        aMissionNavPoints[navPoint + 1].type == 2 ? 2 : -1;
+#else
     nCurrentWave =
         aMissionNavPoints[navPoint + 1].type == 2 ? 2 : -1;
+#endif
     nEnemySighting = 0x7fff;
 
     for (obj = 1; obj < 10; obj++) {
