@@ -2019,6 +2019,7 @@ unsigned int Draw_3Space_Frame(void)
         cScreenViewMode,
         bCockpitlessView > 0,
         cPrimaryViewBufferColour);
+    SdlDustDraw(&stSpaceBufferViewport);
 #endif
     draw_sorted_objects_to_buffer();
     if (nCameraViewMode == 0)

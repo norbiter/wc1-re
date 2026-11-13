@@ -332,6 +332,7 @@ static void DrawExtraFrame(void)
         (int)cScreenViewMode,
         bCockpitlessView > 0,
         (unsigned char)cPrimaryViewBufferColour);
+    SdlDustDraw(&stSpaceBufferViewport);
     draw_sorted_objects_to_buffer();
     if (nCameraViewMode == 0)
         overlay_head_up_display();

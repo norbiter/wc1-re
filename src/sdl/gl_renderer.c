@@ -1767,6 +1767,28 @@ int SdlGlRendererPresent(const unsigned char *pixels,
                          g_renderer.presentedPalette, drawSprites);
 }
 
+/* Display pixels per frame pixel, for sizing what must not be thinner than
+ * one display pixel. */
+float SdlGlRendererOutputScale(void)
+{
+    int drawableWidth;
+    int drawableHeight;
+    int viewportLeft;
+    int viewportBottom;
+    int viewportWidth;
+    int viewportHeight;
+
+    if (g_renderer.window == 0 || g_renderer.frameWidth < 1)
+        return 1.0f;
+    SDL_GL_GetDrawableSize(g_renderer.window, &drawableWidth, &drawableHeight);
+    if (drawableWidth < 1 || drawableHeight < 1)
+        return 1.0f;
+    SdlCalculateOutputViewport(drawableWidth, drawableHeight, &viewportLeft,
+                                  &viewportBottom, &viewportWidth,
+                                  &viewportHeight);
+    return (float)viewportWidth / g_renderer.frameWidth;
+}
+
 void SdlGlRendererWaitForVerticalBlank(void)
 {
     if (!g_renderer.hasLastFrame ||

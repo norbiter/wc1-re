@@ -69,6 +69,7 @@ static void SdlPrintUsage(FILE *stream)
           "  --hitspheres            Show ship hit spheres\n"
           "  --shield-flash          Flash a hemisphere over a ship when its shields take a hit\n"
           "  --smooth                Smooth frame interpolation\n"
+          "  --dust                  Fine space dust that streaks with speed\n"
           "  --ai-throttle[=N]       Tune AI update throttling\n"
           "  --ff                    Suppress friendly fire\n"
           "  --gun-range             Tint the crosshair by effective gun range\n"
@@ -182,6 +183,8 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlShieldFlashEnable();
         } else if (strcmp(argument, "--smooth") == 0) {
             SdlSmoothEnable();
+        } else if (strcmp(argument, "--dust") == 0) {
+            SdlDustEnable();
         } else if (strcmp(argument, "--ai-throttle") == 0) {
             SdlAiThrottleEnable(0);
         } else if (strncmp(argument, "--ai-throttle=", 14) == 0) {

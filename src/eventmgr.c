@@ -1074,6 +1074,11 @@ void draw_sorted_objects_to_buffer(void)
                 asObjectDrawPosX[obj] = screenX;
                 screenY = (screenY + nCurrentViewCenterPosY);
                 asObjectDrawPosY[obj] = screenY;
+#ifdef SDL_PORT
+                /* --dust draws its own field in place of these motes. */
+                if (specialObject != obj && SdlDustHidesObject((short)obj))
+                    break;
+#endif
                 if (specialObject == obj) {
                     shape = apObjShapeArray[obj];
 #ifdef SDL_PORT

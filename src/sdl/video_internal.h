@@ -51,6 +51,7 @@ void SdlGlRendererShutdown(void);
 int SdlGlRendererPresent(const unsigned char *pixels,
                             const unsigned char *palette);
 void SdlGlRendererWaitForVerticalBlank(void);
+float SdlGlRendererOutputScale(void);
 void SdlGlRendererBeginSpaceFrame(
     const struct ScreenViewportGeometry *geometry, int viewportMode,
     int fullViewportCopy, unsigned char clearColour, int marginX,
