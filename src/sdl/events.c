@@ -575,8 +575,7 @@ static int SdlHandleKeyboardEvent(const SDL_KeyboardEvent *event)
     SDL_Keycode symbol;
 
     pressed = event->type == SDL_KEYDOWN;
-    if (pressed && event->repeat != 0 &&
-        SdlIsRepeatableKey(event->keysym.scancode))
+    if (pressed && event->repeat != 0)
         return 0;
     if (pressed && event->repeat == 0 && event->keysym.sym == SDLK_q &&
         (event->keysym.mod & KMOD_GUI) != 0) {
@@ -594,8 +593,10 @@ static int SdlHandleKeyboardEvent(const SDL_KeyboardEvent *event)
         return 0;
     symbol = key == event->keysym.scancode ? event->keysym.sym : SDL_GetKeyFromScancode(key);
     if (SdlIsRepeatableKey(event->keysym.scancode)) {
+        /* Escape never repeats: a held Escape that closed the nav map
+           would otherwise go on to pause the flight behind it. */
         sdlKeyRepeatGameKey[event->keysym.scancode] =
-            pressed ? key : SDL_SCANCODE_UNKNOWN;
+            pressed && key != SDL_SCANCODE_ESCAPE ? key : SDL_SCANCODE_UNKNOWN;
         sdlKeyRepeatDue[event->keysym.scancode] =
             SDL_GetTicks() + SDL_KEY_REPEAT_DELAY_MS;
     }
