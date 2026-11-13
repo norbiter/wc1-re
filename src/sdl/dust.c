@@ -21,6 +21,11 @@
  * ship gathers speed and shrinks back to dots as it stops.  Turning does not
  * streak them.
  *
+ * The original motes cycle through four sprite frames as if tumbling.  Here
+ * each mote's brightness swings gently at a rate and phase of its own, with
+ * a brief glint once per turn, as a facet catches the light.  This runs on
+ * the wall clock, not the sim tick, so it is as smooth as the frame rate.
+ *
  * With --enhanced the motes go to the GL object layer as translucent quads
  * at output resolution, a single display pixel wide at their smallest.
  * Otherwise they are plotted into the 8-bit space buffer as single pixels,
@@ -36,7 +41,7 @@
 
 #include "video_internal.h"
 
-#define DUST_MOTE_COUNT 1024
+#define DUST_MOTE_COUNT 2048
 /* The lattice period, in the 1/256 world units positions are kept in: 4096
  * world units.  A power of two, so that wrapping is a mask. */
 #define DUST_CELL_BITS 20
@@ -52,6 +57,12 @@
 #define DUST_MAX_WIDTH 0.75f
 #define DUST_MIN_WIDTH 0.12f
 #define DUST_PEAK_ALPHA 0.85f
+/* A mote turns once in 0.4 to 1.6 seconds.  Its brightness swings by
+ * DUST_SHIMMER either way and rises by up to DUST_GLINT in the glint. */
+#define DUST_MIN_TURN_HZ 0.6f
+#define DUST_MAX_TURN_HZ 2.5f
+#define DUST_SHIMMER 0.22f
+#define DUST_GLINT 0.55f
 #define DUST_EXPOSURE_TICKS 1.0f
 #define DUST_MAX_STREAK 48.0f
 #define DUST_LEVELS 8
@@ -63,6 +74,8 @@ typedef struct DustMote {
     Uint32 y;
     Uint32 z;
     float brightness;
+    float turnRate;
+    float turnPhase;
 } DustMote;
 
 static int g_bDustEnabled;
@@ -98,12 +111,12 @@ int SdlDustHidesObject(short obj)
 static void SeedDust(void)
 {
     Uint32 state = 0x9e3779b9U;
-    Uint32 values[4];
+    Uint32 values[6];
     int index;
     int part;
 
     for (index = 0; index < DUST_MOTE_COUNT; index++) {
-        for (part = 0; part < 4; part++) {
+        for (part = 0; part < 6; part++) {
             state ^= state << 13;
             state ^= state >> 17;
             state ^= state << 5;
@@ -114,6 +127,11 @@ static void SeedDust(void)
         g_aDustMotes[index].z = values[2] & DUST_CELL_MASK;
         g_aDustMotes[index].brightness =
             0.45f + 0.55f * (float)(values[3] & 0xffU) / 255.0f;
+        g_aDustMotes[index].turnRate =
+            DUST_MIN_TURN_HZ + (DUST_MAX_TURN_HZ - DUST_MIN_TURN_HZ) *
+                                   (float)(values[4] & 0xffffU) / 65535.0f;
+        g_aDustMotes[index].turnPhase =
+            (float)(values[5] & 0xffffU) / 65536.0f;
     }
     g_bDustSeeded = 1;
 }
@@ -325,6 +343,7 @@ void SdlDustDraw(Viewport *viewport)
     float top;
     float rightEdge;
     float bottom;
+    double seconds;
     Uint32 eyeX;
     Uint32 eyeY;
     Uint32 eyeZ;
@@ -372,6 +391,7 @@ void SdlDustDraw(Viewport *viewport)
     drift[1] = DotFixed(world, up) / axisLength;
     drift[2] = DotFixed(world, forward) / axisLength;
 
+    seconds = (double)SDL_GetTicks() / 1000.0;
     focal = SdlFovFocal();
     centreX = (float)nCurrentViewCenterPosX;
     centreY = (float)nCurrentViewCenterPosY;
@@ -396,6 +416,9 @@ void SdlDustDraw(Viewport *viewport)
         float natural;
         float width;
         float alpha;
+        double turn;
+        float swing;
+        float glint;
 
         /* The copy of the mote nearest the eye. */
         world[0] = (float)(int)((mote->x - eyeX + DUST_CELL / 2U) &
@@ -441,7 +464,15 @@ void SdlDustDraw(Viewport *viewport)
             length = DUST_MAX_STREAK;
         }
 
-        alpha = DUST_PEAK_ALPHA * mote->brightness;
+        turn = seconds * mote->turnRate + mote->turnPhase;
+        swing = SDL_sinf(6.28318531f * (float)(turn - SDL_floor(turn)));
+        glint = swing > 0.0f ? swing * swing : 0.0f;
+        glint *= glint;
+        glint *= glint;
+        alpha = DUST_PEAK_ALPHA * mote->brightness *
+                (1.0f + DUST_SHIMMER * swing + DUST_GLINT * glint);
+        if (alpha > 1.0f)
+            alpha = 1.0f;
         if (distance > DUST_RANGE * DUST_FADE_START)
             alpha *= (DUST_RANGE - distance) /
                      (DUST_RANGE * (1.0f - DUST_FADE_START));
