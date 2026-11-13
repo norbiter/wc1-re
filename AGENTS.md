@@ -48,8 +48,9 @@ fixes. It does not pursue a byte-identical reconstruction.
   apply them to fork work, but do not edit upstream-owned code against them either
   (for example, do not add address comments or rename reconstructed functions
   unless taking an upstream change).
-- Document player-visible fork features in the README's "Fixes and features" table
-  and in docs/SDL2.md.
+- Document player-visible fork features in the README's "Fork fixes and features"
+  table. Upstream's own README no longer has a feature table, so keep fork rows in
+  that separate section.
 
 ---
 

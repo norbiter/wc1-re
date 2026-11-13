@@ -122,6 +122,57 @@ remembers your folder and options.
 | --- | --- |
 | [![Enhanced renderer showing two ships at output resolution](screenshots/enhanced-space-objects.webp)](screenshots/enhanced-space-objects.webp) | [![Enhanced renderer during cockpit combat](screenshots/enhanced-cockpit-combat.webp)](screenshots/enhanced-cockpit-combat.webp) |
 
+## Fork fixes and features
+
+On top of upstream's improvements, this fork adds the following.
+
+| Fix or feature | Enable with |
+| --- | --- |
+| Every held key keeps repeating, so accelerating while using the radio works | always on |
+| Protected transports are no longer blown up for flying through an enemy-held nav point while you're far away (mission 7-1 scored the second transport as lost although it survived) | always on |
+| Autopilot waits ("Drayman Inbound") while a friendly ship you're meant to meet is still due to jump in at the current nav point; the original left it behind, so in mission 7-1 clearing the Jalthi early and autopiloting home scored the second transport as lost | always on |
+| Ship objectives (such as the Fralthi in mission 8-2) are sighted when the ship itself is on screen within range; the original checked whether your wingman was on screen, so with no wingman, or one out of view, the sighting never counted | always on |
+| Stationary asteroids appear where the field placed them; a wrong type check gave them the mines' random setback of up to 1000 units along their heading | always on |
+| Camera-relative panning for in-flight sound effects: correct left/right (it was mirrored), a steeper pan curve, and on Kilrathi Saga data a slight far-ear delay plus a muffled, quieter sound for sources behind you | always on |
+| Kilrathi Saga sound effects get quieter with distance (the Win32 build passed the distance as the volume, so far-away sounds were the loudest) | always on |
+| Ships drawn from point-cloud models at any angle, instead of the 37 sprite views (`SHIP_Vnn.ply` / `SHIPTYPE_Vnn.ply` from `ship3d/`, relit from their `.npz` data after a one-time `python3 bin/ship3dLight.py`. With `--enhanced` they are drawn at output resolution with continuous true-colour shading between palette ramp entries, and still follow palette fades; without it they are splatted into the 320x200 frame. Crevices are darkened by ambient occlusion worked out from each hull's distance field, and edges turned towards a rim light behind the ship pick up the ship's own lit colours, as does a faint Fresnel outline where the hull is seen edge-on) | `--ship3d` or `--ship3d=<dir>` |
+| 3D ships shaded in true colour instead of snapping each point to the nearest palette entry (with `--ship3d` and `--enhanced`; needs the version 3 `.light` sidecars from a fresh `python3 bin/ship3dLight.py`). These ships do not follow palette fades | `--ship3d-truecolour` |
+| Debug overlay: each ship's collision volume as a semitransparent magenta shape, for judging hit detection. Ships with a `ship3d/` model show their hull inflated by a laser bolt's radius (from a signed distance field of the point cloud); others show the collision sphere. Drawn into the indexed frame, so under the `--enhanced` sprite layer; combine with `--ship3d` to see it over ships | `--hitspheres` |
+| Fewer AI decisions in crowded fights, standing in for the frame-rate drop that eased big battles in 1996: once more than `<ships>` (default 6) fighters are in flight, each one's decision step runs every 2nd to 4th time instead of every time. Collision avoidance, flight physics and the player are unaffected | `--ai-throttle` or `--ai-throttle=<ships>` |
+| No friendly fire: a gun shot or missile that touches a ship on its shooter's own side vanishes without damage or impact effects, and blasts (missile, flak, exploding ships) no longer damage ships on the same side as their source; same-side collisions still bounce but do no damage. Enemy hits and asteroids are unchanged | `--ff` |
+| Gun-range crosshair: the central crosshair is dark grey until the target is within effective range of every enabled gun (muzzle speed plus your own speed, minus the target's, along your heading, times shot lifetime), then shows its normal bright colour | `--gun-range` |
+| Shield flash: when a ship's shields take a hit, a translucent blue hemisphere flashes over it on the side the shot came from, follows the ship as it turns, and fades within about 0.3 s. Drawn into the indexed frame, or, when `--ship3d` ships are in the GL object layer, smoothly into that layer with them | `--shield-flash` |
+| Mouse curve: pointer offset maps to yaw and pitch through a smooth curve, mostly linear near the centre and bending exponentially towards full deflection, instead of the original's uneven step table. Small adjustments stay small and a large flick reaches the maximum; the game still gets its -8..8 steps, so turn rates stay those of the craft. `=PCT` scales sensitivity (above 100 is more sensitive, default 100) | `--mouse-curve[=PCT]` |
+| Joystick curve: the same linear-into-exponential shaping for gamepad and joystick axes, with an 8% dead zone (the extra axes otherwise use a fixed 25%). In the default original mode the game's own calibration still quantises the reshaped stick to its steps and keeps its one-step dead zone. `=PCT` scales sensitivity | `--joystick-curve[=PCT]` |
+| Sturdier escorts: friendly transports and capital ships (Venture, Dilligent, Drayman, Exeter, Tiger's Claw) get double shields, buying time on escort and protection missions before you arrive | `--sturdy-friends` |
+| Fewer missiles to dodge: every Kilrathi ship spawns with at most one missile of each type it carries (SWC flight: ammo capped at 1 too), so early engagements are less about baiting out missiles | `--low-missile` |
+| Space flight drawn at three times the sim rate (60 fps from the 20 fps tick). The sim, AI and physics keep their tick; two extra frames per tick advance every object along its current velocity and turn rate, and the controls are re-read for each, so the view answers input without added delay. Cockpit and cockpit-less views only; chase and external views, frame skip and the training simulator draw one frame per tick as before. Pacing assumes a 60 Hz display | `--smooth` |
+| Fair asteroids: no rocks spawned on an intercept course. The original aims some asteroids that appear in view at the spot you will reach after their flight time, so holding course means a hit; with this switch they drift like the rest of the field | `--fair-asteroids` |
+| Cockpit-less flight (`c`) fills a fullscreen display of any shape instead of sitting in a 4:3 box: on a wider display the view gains field of view at the sides, on a taller one above and below. The middle of the picture is exactly the 4:3 one, and the instruments stay in that middle block. Windowed play, the cockpit views and everything outside flight keep the original 4:3 frame; switching to or from fullscreen in flight takes effect on the next frame | `--aspectless` |
+| Cockpit-less flight (`c`) can use a wider or narrower field of view than the original 90 degrees across the 4:3 picture. Ships, the nav cross and the overlays drawn over ships all follow it; a wider view makes everything smaller, but ships stay drawn and targetable out to the original range, and a missile lock holds over the original angle. The cockpit views keep the original perspective. Combines with `--aspectless`, which adds its extra width on top | `--fov=DEGREES` (60-140) |
+| Debug mission picker: hold Alt while loading a saved game to jump to any series and mission (left/right = series, up/down = mission, Enter = go, Esc = keep the save as it was). Ship type follows the series that leads into the chosen one | `--mission-menu` |
+| Unknown `--` options are rejected with a list of the accepted ones (`MODERN_ARGS=--help` shows it without starting the game) | `--help` |
+
+### Known mission quirks and ideas
+
+Some escort missions are notoriously fragile in the original game too (mission
+7-1 is one of them), so these are likely original behaviour rather than
+reconstruction errors.
+
+- Entering the radius of *any* type-1 nav point, in any order, makes
+  `ReleaseStaleNavTarget` switch the active sphere. `set_up_action_sphere` then
+  explodes every on-screen ship of the old sphere and marks it dead (state 3),
+  friendly escort targets included. This probably explains fighters and
+  transports vanishing mid-fight when the player turns back toward a nav
+  point such as the Tiger's Claw. Unconfirmed for the Krant that vanished
+  later in 7-1.
+- Possible fixes: remove protect/escort objective ships quietly on a switch,
+  without the explosion or the dead mark; or defer the switch while hostile
+  ships are near the player (would need a flag, as it changes pacing).
+- `abandoned()` is now bypassed for ships a protect/escort objective refers to
+  (always on). Other ships still get written off when they enter a hostile
+  sphere more than 10000 from the player.
+
 ## Controls
 
 | Shortcut | Action |
