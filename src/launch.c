@@ -213,6 +213,12 @@ unsigned int ShowCarrierLaunchSequence(signed char sceneObject)
     asObjScreenAngles[sceneObject] = 0;
     asObjScreenScalesArray[sceneObject] = 0x100;
     asObjDistancesTable[sceneObject] = 2000;
+#ifdef SDL_PORT
+    /* This scene poses the fighter by sprite frame and screen angle, and its
+     * "carrier" is a close-up of the flight deck, not the carrier's views. */
+    SdlShip3dSetPoseSource(0, SHIP3D_POSE_SPRITE_VIEW);
+    SdlShip3dSetPoseSource(sceneObject, SHIP3D_POSE_SPRITE_ONLY);
+#endif
     nFrameSkipCounter = 1;
     bEscapePressedFlag = 0;
     frame = 0;
@@ -289,6 +295,10 @@ unsigned int ShowCarrierLaunchSequence(signed char sceneObject)
 
     aeObjectClass[0] = OBJECT_CLASS_NULL;
     aeObjectClass[sceneObject] = OBJECT_CLASS_NULL;
+#ifdef SDL_PORT
+    SdlShip3dSetPoseSource(0, SHIP3D_POSE_ORIENTATION);
+    SdlShip3dSetPoseSource(sceneObject, SHIP3D_POSE_ORIENTATION);
+#endif
     if (bEscapePressedFlag != 1) {
         copy_frame(sceneObject, 61);
         aShipPositionsArray[61] = aShipPositionsArray[sceneObject];

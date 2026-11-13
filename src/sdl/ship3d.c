@@ -115,6 +115,8 @@ static float *g_pfShip3dDepth;
 static int g_nShip3dDepthPixels;
 static float *g_pfShip3dGlPoints;
 static int g_nShip3dGlPointCapacity;
+/* Where each object's orientation comes from: SHIP3D_POSE_*. */
+static unsigned char g_aeShip3dPoseSource[SPACE_OBJECT_COUNT];
 
 void SdlShip3dEnable(const char *directory)
 {
@@ -588,6 +590,78 @@ static float DotShip3d(const FixedVector *a, const FixedVector *b)
             (float)a->z * (float)b->z) * (1.0f / 65536.0f);
 }
 
+void SdlShip3dSetPoseSource(short obj, int source)
+{
+    if (obj >= 0 && obj < SPACE_OBJECT_COUNT)
+        g_aeShip3dPoseSource[obj] = (unsigned char)source;
+}
+
+/* The model-to-camera rotation that the sprite view obj currently shows
+ * (its frame, flip and screen angle) stands for.  This undoes
+ * get_right_shape: the frame and flip name one of the 62 view directions,
+ * whose right/up/forward vectors are the camera's axes in the ship's own
+ * frame before the sprite is turned by the screen angle.  Over random
+ * orientations the result stays within 26 degrees of the orientation
+ * get_right_shape was given, which is the coarseness of the 30-degree views.
+ * Returns 0 if the frame is not one of the fighter views. */
+static int ComputeShip3dSpriteBasis(short obj, float basis[3][3])
+{
+    const float sign[3] = { 1.0f, -1.0f, -1.0f };
+    float right[3];
+    float up[3];
+    float forward[3];
+    float camera[3][3];
+    float radians;
+    float cosine;
+    float sine;
+    int frame = asObjectViewFrames[obj];
+    int flip = (asObjectFlipArray[obj] >> 4) & 3;
+    int angle = asObjScreenAngles[obj];
+    int direction;
+    int axis;
+
+    for (direction = 0; direction < DIRECTION_VIEW_COUNT; direction++) {
+        if (acDirectionShapeFrame[direction] == frame &&
+            acDirectionShapeFlip[direction] == flip)
+            break;
+    }
+    if (direction == DIRECTION_VIEW_COUNT)
+        return 0;
+    /* get_right_shape turns the two pole views a further quarter. */
+    if (frame == 0)
+        angle -= 90;
+    else if (frame == 36)
+        angle += 90;
+
+    right[0] = (float)aDirectionViewRightVector[direction].x / 256.0f;
+    right[1] = (float)aDirectionViewRightVector[direction].y / 256.0f;
+    right[2] = (float)aDirectionViewRightVector[direction].z / 256.0f;
+    up[0] = (float)aDirectionViewUpVectorArray[direction].x / 256.0f;
+    up[1] = (float)aDirectionViewUpVectorArray[direction].y / 256.0f;
+    up[2] = (float)aDirectionViewUpVectorArray[direction].z / 256.0f;
+    forward[0] = (float)aDirectionViewForwardVector[direction].x / 256.0f;
+    forward[1] = (float)aDirectionViewForwardVector[direction].y / 256.0f;
+    forward[2] = (float)aDirectionViewForwardVector[direction].z / 256.0f;
+
+    radians = (float)angle * (3.14159265358979f / 180.0f);
+    cosine = SDL_cosf(radians);
+    sine = SDL_sinf(radians);
+    for (axis = 0; axis < 3; axis++) {
+        camera[1][axis] = cosine * up[axis] - sine * right[axis];
+        /* The table's forward vector points from the ship to the viewer. */
+        camera[2][axis] = -forward[axis];
+    }
+    camera[0][0] = camera[1][1] * camera[2][2] - camera[1][2] * camera[2][1];
+    camera[0][1] = camera[1][2] * camera[2][0] - camera[1][0] * camera[2][2];
+    camera[0][2] = camera[1][0] * camera[2][1] - camera[1][1] * camera[2][0];
+    for (axis = 0; axis < 3; axis++) {
+        basis[0][axis] = sign[axis] * camera[0][axis];
+        basis[1][axis] = sign[axis] * camera[1][axis];
+        basis[2][axis] = sign[axis] * camera[2][axis];
+    }
+    return 1;
+}
+
 /* The model-to-camera rotation for obj: basis[camera][modelAxis]. */
 void SdlShip3dComputeBasis(short obj, float basis[3][3])
 {
@@ -596,6 +670,9 @@ void SdlShip3dComputeBasis(short obj, float basis[3][3])
     float sign[3] = { 1.0f, -1.0f, -1.0f };
     int axis;
 
+    if (g_aeShip3dPoseSource[obj] == SHIP3D_POSE_SPRITE_VIEW &&
+        ComputeShip3dSpriteBasis(obj, basis))
+        return;
     eye[0] = &aShipRightVector[EYE_OBJECT];
     eye[1] = &aShipUpVector[EYE_OBJECT];
     eye[2] = &aShipFwdVec[EYE_OBJECT];
@@ -659,6 +736,10 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
         return 0;
     if (aeObjectClass[obj] != OBJECT_CLASS_CAPITAL_SHIP &&
         aeObjectClass[obj] != OBJECT_CLASS_SHIP)
+        return 0;
+    if (g_aeShip3dPoseSource[obj] == SHIP3D_POSE_SPRITE_ONLY ||
+        (g_aeShip3dPoseSource[obj] == SHIP3D_POSE_SPRITE_VIEW &&
+         !ComputeShip3dSpriteBasis(obj, basis)))
         return 0;
     model = (Ship3dModel *)GetShip3dModel(aeObjectTypeList[obj]);
     if (model == NULL)

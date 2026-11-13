@@ -272,6 +272,15 @@ int SdlShip3dDraw(struct Viewport *viewport, short obj, float centerX,
                   float centerY);
 void SdlShip3dShutdown(void);
 void SdlShip3dComputeBasis(short obj, float basis[3][3]);
+/* Where SdlShip3dDraw takes an object's orientation from.  Flight keeps the
+ * default; scenes that pose their actors by sprite frame instead of by
+ * orientation vectors select one of the others and restore the default. */
+enum {
+    SHIP3D_POSE_ORIENTATION = 0, /* the object's right/up/forward vectors */
+    SHIP3D_POSE_SPRITE_VIEW = 1, /* its sprite frame, flip and screen angle */
+    SHIP3D_POSE_SPRITE_ONLY = 2  /* no model: draw the scene's own sprite */
+};
+void SdlShip3dSetPoseSource(short obj, int source);
 int SdlShip3dGetPoints(int type, const float **xyz, int *stride, int *count);
 typedef struct HullField HullField;
 const HullField *SdlGetHullField(int type);
