@@ -58,7 +58,13 @@ int nUpArrowKeyState; /* 0x00475c10 */
 static
 #endif
 int nDownArrowKeyState; /* 0x00475c14 */
+#ifdef SDL_PORT
+/* Room for a full-length working directory plus the streams suffix; the
+ * original overruns its 256 bytes when the game runs from a long path. */
+static char szStreamsDir[0x200];
+#else
 static char szStreamsDir[0x100]; /* 0x00475c18 */
+#endif
 #ifndef SDL_PORT
 static
 #endif
@@ -230,9 +236,19 @@ char *LocateStreamsDirOnDisc(void)
 #else
     if (strstr(current, "gamedat") != 0)
 #endif
+#ifdef SDL_PORT
+        snprintf(result, sizeof(szStreamsDir), "%s\\..\\%s", current,
+                 "streams\\");
+#else
         sprintf(result, "%s\\..\\%s", current, "streams\\");
+#endif
     else
+#ifdef SDL_PORT
+        snprintf(result, sizeof(szStreamsDir), "%s\\%s", current,
+                 "streams\\");
+#else
         sprintf(result, "%s\\%s", current, "streams\\");
+#endif
     GetCurrentDirectoryA(0xff, current);
     if (!SetCurrentDirectoryA(result))
         result = 0;

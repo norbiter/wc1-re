@@ -1484,7 +1484,13 @@ void InitializeAudioStreamer(HWND window)
 }
 
 static int bStreamerAudioRunning; /* 0x00597748 */
+#ifdef SDL_PORT
+/* Holds any streams directory plus a stream name; the original's 128 bytes
+ * overflow when the game runs from a long path. */
+static char szStreamerPathBuffer[0x300];
+#else
 static char szStreamerPathBuffer[128]; /* 0x00597750 */
+#endif
 
 /* Function start: 0x4423B0 */
 void Streamer_open(const char *streamName)
@@ -1497,8 +1503,13 @@ void Streamer_open(const char *streamName)
             ShowNoticeMessageBox("Unable to locate streamed music.\n");
             exit_squadron("");
         }
+#ifdef SDL_PORT
+        snprintf(szStreamerPathBuffer, sizeof(szStreamerPathBuffer), "%s%s",
+                 streamsDirectory, streamName);
+#else
         sprintf(szStreamerPathBuffer, "%s%s",
                 streamsDirectory, streamName);
+#endif
         SoundDebugPrintf("Streamer_open %s", szStreamerPathBuffer);
         ix_streamer_open_stream_file(szStreamerPathBuffer);
         bStreamerAudioRunning = 0;
