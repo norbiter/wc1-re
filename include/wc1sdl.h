@@ -315,6 +315,12 @@ float SdlGlareSilhouette(float x, float y, float radius, float direction[3],
                          float colour[3]);
 void SdlGlareCoverPoint(float x, float y, float halfExtent);
 void SdlGlareDraw(const struct Viewport *viewport);
+struct TextContext;
+void SdlTtfTextEnable(void);
+void SdlTtfTextBeginGlyph(const struct TextContext *context,
+                          unsigned char character, int height, int width,
+                          int y);
+void SdlTtfTextEndGlyph(const struct TextContext *context);
 void SdlSmoothEnable(void);
 int SdlSmoothSubFrame(void);
 void SdlSmoothHudBegin(void);

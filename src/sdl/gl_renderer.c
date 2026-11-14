@@ -453,6 +453,43 @@ static const GLchar g_shipFragmentShaderSource[] =
     "    }\n"
     "}\n";
 
+/* --ttf-text: TrueType glyphs from a coverage atlas, in a palette entry so
+   they follow fades.  Positions are frame pixels; u_frame holds the frame's
+   size and the margins round the 320x200 screen. */
+static const GLchar g_textVertexShaderSource[] =
+    "#version 150\n"
+    "in vec2 a_position;\n"
+    "in vec2 a_texCoord;\n"
+    "in float a_textColour;\n"
+    "uniform vec4 u_frame;\n"
+    "out vec2 v_texCoord;\n"
+    "flat out int v_colour;\n"
+    "void main()\n"
+    "{\n"
+    "    vec2 position = a_position + u_frame.zw;\n"
+    "    gl_Position = vec4(position.x / u_frame.x * 2.0 - 1.0,\n"
+    "                       1.0 - position.y / u_frame.y * 2.0, 0.0, 1.0);\n"
+    "    v_texCoord = a_texCoord;\n"
+    "    v_colour = int(a_textColour + 0.5);\n"
+    "}\n";
+
+static const GLchar g_textFragmentShaderSource[] =
+    "#version 150\n"
+    "uniform sampler2D u_atlas;\n"
+    "uniform sampler2D u_palette;\n"
+    "in vec2 v_texCoord;\n"
+    "flat in int v_colour;\n"
+    "out vec4 outputColour;\n"
+    "void main()\n"
+    "{\n"
+    "    float coverage = texture(u_atlas, v_texCoord).r;\n"
+    "    vec3 colour = texelFetch(u_palette, ivec2(v_colour, 0), 0).rgb;\n"
+    "    outputColour = vec4(colour * coverage, coverage);\n"
+    "}\n";
+
+#define GL_RENDERER_TEXT_QUAD_CAPACITY 4096
+#define GL_RENDERER_TEXT_VERTEX_FLOATS 5
+
 typedef struct GlRenderer {
     SDL_Window *window;
     SDL_GLContext context;
@@ -479,6 +516,19 @@ typedef struct GlRenderer {
     GLint shipFrameUniform;
     GLint baseFrameUniform;
     GLint spriteFrameUniform;
+    /* --ttf-text */
+    GLuint textProgram;
+    GLuint textVertexArray;
+    GLuint textVertexBuffer;
+    GLuint textAtlasTexture;
+    GLint textFrameUniform;
+    GLint textAtlasUniform;
+    GLint textPaletteUniform;
+    int textAtlasUploaded;
+    unsigned int textAtlasGeneration;
+    unsigned char textMouseFree[SDL_PORT_FRAME_WIDTH * SDL_PORT_FRAME_HEIGHT];
+    float textVertices[GL_RENDERER_TEXT_QUAD_CAPACITY * 6 *
+                       GL_RENDERER_TEXT_VERTEX_FLOATS];
     /* The frame being presented, and the one the recorded sprites were
        positioned for: 320x200 unless --aspectless added margins. */
     int frameWidth;
@@ -740,6 +790,7 @@ static GLuint LinkGlProgram(const GLchar *vertexSource,
         g_renderer.gl.BindAttribLocation(program, 2, "a_atlasRect");
         g_renderer.gl.BindAttribLocation(program, 3, "a_clip");
         g_renderer.gl.BindAttribLocation(program, 4, "a_spriteInfo");
+        g_renderer.gl.BindAttribLocation(program, 2, "a_textColour");
         g_renderer.gl.BindAttribLocation(program, 0, "a_shipPosition");
         g_renderer.gl.BindAttribLocation(program, 1, "a_shipColour");
         g_renderer.gl.BindAttribLocation(program, 2, "a_shipBrightness");
@@ -1342,6 +1393,161 @@ static void DrawRecordedSprites(float outputScale, int viewportLeft,
     }
 }
 
+/* Sets up the --ttf-text program, buffers and atlas on first use. */
+static int PrepareGlText(void)
+{
+    if (g_renderer.textProgram != 0)
+        return 1;
+    g_renderer.textProgram = LinkGlProgram(g_textVertexShaderSource,
+                                           g_textFragmentShaderSource);
+    if (g_renderer.textProgram == 0)
+        return 0;
+    g_renderer.textFrameUniform =
+        g_renderer.gl.GetUniformLocation(g_renderer.textProgram, "u_frame");
+    g_renderer.textAtlasUniform =
+        g_renderer.gl.GetUniformLocation(g_renderer.textProgram, "u_atlas");
+    g_renderer.textPaletteUniform =
+        g_renderer.gl.GetUniformLocation(g_renderer.textProgram, "u_palette");
+    g_renderer.gl.GenVertexArrays(1, &g_renderer.textVertexArray);
+    g_renderer.gl.GenBuffers(1, &g_renderer.textVertexBuffer);
+    g_renderer.gl.GenTextures(1, &g_renderer.textAtlasTexture);
+    if (g_renderer.textVertexArray == 0 || g_renderer.textVertexBuffer == 0 ||
+        g_renderer.textAtlasTexture == 0) {
+        fprintf(stderr, "OpenGL text resources are unavailable.\n");
+        return 0;
+    }
+    g_renderer.gl.BindVertexArray(g_renderer.textVertexArray);
+    g_renderer.gl.BindBuffer(GL_ARRAY_BUFFER, g_renderer.textVertexBuffer);
+    g_renderer.gl.EnableVertexAttribArray(0);
+    g_renderer.gl.VertexAttribPointer(
+        0, 2, GL_FLOAT, GL_FALSE,
+        sizeof(float) * GL_RENDERER_TEXT_VERTEX_FLOATS, 0);
+    g_renderer.gl.EnableVertexAttribArray(1);
+    g_renderer.gl.VertexAttribPointer(
+        1, 2, GL_FLOAT, GL_FALSE,
+        sizeof(float) * GL_RENDERER_TEXT_VERTEX_FLOATS,
+        (const void *)(sizeof(float) * 2));
+    g_renderer.gl.EnableVertexAttribArray(2);
+    g_renderer.gl.VertexAttribPointer(
+        2, 1, GL_FLOAT, GL_FALSE,
+        sizeof(float) * GL_RENDERER_TEXT_VERTEX_FLOATS,
+        (const void *)(sizeof(float) * 4));
+    g_renderer.gl.BindVertexArray(g_renderer.vertexArray);
+    g_renderer.gl.ActiveTexture(GL_TEXTURE5);
+    g_renderer.gl.BindTexture(GL_TEXTURE_2D, g_renderer.textAtlasTexture);
+    g_renderer.gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                                GL_LINEAR);
+    g_renderer.gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                                GL_LINEAR);
+    g_renderer.gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+                                GL_CLAMP_TO_EDGE);
+    g_renderer.gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+                                GL_CLAMP_TO_EDGE);
+    return 1;
+}
+
+/* Draws the glyphs SdlTtfTextPrepare laid out for the presented frame. */
+static void DrawTtfText(void)
+{
+    const SdlTtfTextQuad *quads;
+    const unsigned char *atlas;
+    unsigned int generation;
+    int atlasSize;
+    int marginX;
+    int marginY;
+    int count;
+    int index;
+
+    quads = SdlTtfTextQuads(&count);
+    if (count <= 0 || !PrepareGlText())
+        return;
+    if (count > GL_RENDERER_TEXT_QUAD_CAPACITY)
+        count = GL_RENDERER_TEXT_QUAD_CAPACITY;
+    atlas = SdlTtfTextAtlas(&atlasSize, &generation);
+    g_renderer.gl.ActiveTexture(GL_TEXTURE5);
+    g_renderer.gl.BindTexture(GL_TEXTURE_2D, g_renderer.textAtlasTexture);
+    if (!g_renderer.textAtlasUploaded ||
+        g_renderer.textAtlasGeneration != generation) {
+        g_renderer.gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        g_renderer.gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R8, atlasSize, atlasSize,
+                                 0, GL_RED, GL_UNSIGNED_BYTE, atlas);
+        g_renderer.textAtlasUploaded = 1;
+        g_renderer.textAtlasGeneration = generation;
+    }
+    for (index = 0; index < count; index++) {
+        static const int corners[6] = { 0, 1, 2, 2, 1, 3 };
+        const SdlTtfTextQuad *quad = &quads[index];
+        int vertex;
+
+        for (vertex = 0; vertex < 6; vertex++) {
+            float *out = g_renderer.textVertices +
+                         ((size_t)index * 6 + vertex) *
+                             GL_RENDERER_TEXT_VERTEX_FLOATS;
+            int right = (corners[vertex] & 2) != 0;
+            int bottom = (corners[vertex] & 1) != 0;
+
+            out[0] = right ? quad->right : quad->left;
+            out[1] = bottom ? quad->bottom : quad->top;
+            out[2] = right ? quad->u1 : quad->u0;
+            out[3] = bottom ? quad->v1 : quad->v0;
+            out[4] = (float)quad->colour;
+        }
+    }
+    SdlGetFrameGeometry(0, 0, &marginX, &marginY);
+    g_renderer.gl.UseProgram(g_renderer.textProgram);
+    g_renderer.gl.Uniform4f(g_renderer.textFrameUniform,
+                            (float)g_renderer.frameWidth,
+                            (float)g_renderer.frameHeight, (float)marginX,
+                            (float)marginY);
+    g_renderer.gl.Uniform1i(g_renderer.textAtlasUniform, 5);
+    g_renderer.gl.ActiveTexture(GL_TEXTURE1);
+    g_renderer.gl.BindTexture(GL_TEXTURE_2D, g_renderer.paletteTexture);
+    g_renderer.gl.Uniform1i(g_renderer.textPaletteUniform, 1);
+    g_renderer.gl.BindVertexArray(g_renderer.textVertexArray);
+    g_renderer.gl.BindBuffer(GL_ARRAY_BUFFER, g_renderer.textVertexBuffer);
+    g_renderer.gl.BufferData(
+        GL_ARRAY_BUFFER,
+        (GLsizeiptr)(sizeof(float) * (size_t)count * 6 *
+                     GL_RENDERER_TEXT_VERTEX_FLOATS),
+        g_renderer.textVertices, GL_STREAM_DRAW);
+    g_renderer.gl.Disable(GL_DEPTH_TEST);
+    g_renderer.gl.Enable(GL_BLEND);
+    g_renderer.gl.BlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    g_renderer.gl.DrawArrays(GL_TRIANGLES, 0, count * 6);
+    g_renderer.gl.Disable(GL_BLEND);
+    g_renderer.gl.BindVertexArray(g_renderer.vertexArray);
+    g_renderer.gl.BindBuffer(GL_ARRAY_BUFFER, g_renderer.vertexBuffer);
+}
+
+/* Lays out --ttf-text for a frame about to be presented, taking the
+   replaced glyphs' ink out of presentedFrame. */
+static void PrepareTtfTextFrame(const unsigned char *pixels)
+{
+    int drawableWidth;
+    int drawableHeight;
+    int viewportLeft;
+    int viewportBottom;
+    int viewportWidth;
+    int viewportHeight;
+    int frameWidth;
+    int frameHeight;
+
+    if (!SdlTtfTextEnabled() || g_renderer.window == 0)
+        return;
+    SDL_GL_GetDrawableSize(g_renderer.window, &drawableWidth, &drawableHeight);
+    if (drawableWidth < 1 || drawableHeight < 1)
+        return;
+    SdlCalculateOutputViewport(drawableWidth, drawableHeight, &viewportLeft,
+                               &viewportBottom, &viewportWidth,
+                               &viewportHeight);
+    SdlGetFrameGeometry(&frameWidth, &frameHeight, 0, 0);
+    CopyBaseWithoutMouse(g_renderer.textMouseFree, pixels);
+    SdlTtfTextPrepare(pixels, g_renderer.textMouseFree,
+                      g_renderer.presentedFrame,
+                      (float)viewportWidth / frameWidth,
+                      (float)viewportHeight / frameHeight);
+}
+
 static int RenderGlFrame(const unsigned char *pixels,
                          const unsigned char *palette, int drawSprites)
 {
@@ -1401,6 +1607,7 @@ static int RenderGlFrame(const unsigned char *pixels,
         DrawRecordedSprites((float)viewportWidth / g_renderer.frameWidth,
                             viewportLeft, viewportBottom, viewportWidth,
                             viewportHeight);
+    DrawTtfText();
     SDL_GL_SwapWindow(g_renderer.window);
     return 1;
 }
@@ -1602,6 +1809,8 @@ void SdlGlRendererShutdown(void)
         textures[2] = g_renderer.maskTexture;
         textures[3] = g_renderer.spriteAtlasTexture;
         g_renderer.gl.DeleteTextures(4, textures);
+        if (g_renderer.textAtlasTexture != 0)
+            g_renderer.gl.DeleteTextures(1, &g_renderer.textAtlasTexture);
         for (slot = 0; slot < GL_RENDERER_IMAGE_CAPACITY; slot++) {
             if (g_renderer.images[slot].texture != 0)
                 g_renderer.gl.DeleteTextures(
@@ -1631,7 +1840,15 @@ void SdlGlRendererShutdown(void)
             g_renderer.gl.DeleteProgram(g_renderer.spriteProgram);
         if (g_renderer.shipProgram != 0)
             g_renderer.gl.DeleteProgram(g_renderer.shipProgram);
+        if (g_renderer.textProgram != 0)
+            g_renderer.gl.DeleteProgram(g_renderer.textProgram);
     }
+    if (canDeleteResources && g_renderer.gl.DeleteBuffers != 0 &&
+        g_renderer.textVertexBuffer != 0)
+        g_renderer.gl.DeleteBuffers(1, &g_renderer.textVertexBuffer);
+    if (canDeleteResources && g_renderer.gl.DeleteVertexArrays != 0 &&
+        g_renderer.textVertexArray != 0)
+        g_renderer.gl.DeleteVertexArrays(1, &g_renderer.textVertexArray);
     ReleaseRendererStorage();
     if (g_renderer.context != 0)
         SDL_GL_DeleteContext(g_renderer.context);
@@ -1965,6 +2182,7 @@ int SdlGlRendererPresent(const unsigned char *pixels,
     }
     memcpy(g_renderer.presentedFrame, pixels,
            sizeof(g_renderer.presentedFrame));
+    PrepareTtfTextFrame(pixels);
     memcpy(g_renderer.presentedPalette, palette,
            sizeof(g_renderer.presentedPalette));
     g_renderer.hasLastFrame = 1;

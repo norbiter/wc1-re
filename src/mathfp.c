@@ -382,7 +382,16 @@ void __stdcall DrawTextCharacter(char character)
 #endif
         context = pCurTextContext;
         cursorY = context->cursorY;
+#ifdef SDL_PORT
+        /* --ttf-text records the glyph to draw it again at display
+         * resolution while it stays on screen. */
+        SdlTtfTextBeginGlyph(context, (unsigned char)character, fontHeight,
+                             (int)glyphWidth, cursorY);
         DrawFontGlyph(character, context, fontHeight, glyphWidth, cursorY);
+        SdlTtfTextEndGlyph(context);
+#else
+        DrawFontGlyph(character, context, fontHeight, glyphWidth, cursorY);
+#endif
     }
 }
 

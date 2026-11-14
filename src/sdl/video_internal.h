@@ -71,4 +71,25 @@ int SdlGlRendererRecordSpaceSprite(const struct Viewport *viewport, float x,
                                       short frame, short angle, short scale,
                                       short flip);
 
+/* --ttf-text: one TrueType glyph, in 320x200 frame coordinates, with its
+ * place in the glyph atlas and its palette entry. */
+typedef struct SdlTtfTextQuad {
+    float left;
+    float top;
+    float right;
+    float bottom;
+    float u0;
+    float v0;
+    float u1;
+    float v1;
+    unsigned char colour;
+} SdlTtfTextQuad;
+
+int SdlTtfTextEnabled(void);
+int SdlTtfTextPrepare(const unsigned char *screen,
+                      const unsigned char *mouseFree, unsigned char *erased,
+                      float scaleX, float scaleY);
+const SdlTtfTextQuad *SdlTtfTextQuads(int *count);
+const unsigned char *SdlTtfTextAtlas(int *size, unsigned int *generation);
+
 #endif

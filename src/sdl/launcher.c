@@ -78,6 +78,8 @@ static void SdlPrintUsage(FILE *stream)
           "                          backdrop's sun or lit planet\n"
           "  --glare                 With --enhanced, a large sun dazzles: a haze\n"
           "                          round it, and 3D ships before it in silhouette\n"
+          "  --ttf-text              With --enhanced, draw text in the Space Wing\n"
+          "                          Leader TrueType font at display resolution\n"
           "  --ai-throttle[=N]       Tune AI update throttling\n"
           "  --ff                    Suppress friendly fire\n"
           "  --gun-range             Tint the crosshair by effective gun range\n"
@@ -201,6 +203,8 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlBackdropLightEnable();
         } else if (strcmp(argument, "--glare") == 0) {
             SdlGlareEnable();
+        } else if (strcmp(argument, "--ttf-text") == 0) {
+            SdlTtfTextEnable();
         } else if (strcmp(argument, "--ai-throttle") == 0) {
             SdlAiThrottleEnable(0);
         } else if (strncmp(argument, "--ai-throttle=", 14) == 0) {
