@@ -72,6 +72,13 @@
 #define SHIP3D_RIM_STRENGTH 0.4f
 #define SHIP3D_RIM_POWER 2.85f
 
+/* --glare silhouettes: how much of the camera light a ship lined up with
+ * the sun loses, and how far up its ramp the sun's rim moves an edge. */
+#define SHIP3D_SILHOUETTE_KEY 0.95f
+#define SHIP3D_SILHOUETTE_RIM 2.4f
+/* And how much darker the whole hull goes. */
+#define SHIP3D_SILHOUETTE_DARKEN 0.8f
+
 /* Fresnel outline: Schlick's (1 - n.v)^5 with no reflectance head-on, scaled
  * to how far up the shade ramp it can move a point seen edge-on. */
 #define SHIP3D_FRESNEL_STRENGTH 0.57f
@@ -107,6 +114,8 @@ typedef struct Ship3dModel {
     /* occlusion[point]: brightness 0..1 left by ambient occlusion */
     float *occlusion;
     int occlusionTried;
+    /* The farthest point from the origin, for --glare; 0 until measured. */
+    float radius;
 } Ship3dModel;
 
 static char g_szShip3dDirectory[1024];
@@ -717,6 +726,44 @@ int SdlShip3dGetPoints(int type, const float **xyz, int *stride, int *count)
     return 1;
 }
 
+static float GetShip3dRadius(Ship3dModel *model)
+{
+    int index;
+
+    if (model->radius <= 0.0f) {
+        float squared = 0.0f;
+
+        for (index = 0; index < model->count; index++) {
+            const Ship3dPoint *point = &model->points[index];
+            float length = point->x * point->x + point->y * point->y +
+                           point->z * point->z;
+
+            if (length > squared)
+                squared = length;
+        }
+        model->radius = squared > 0.0f ? SDL_sqrtf(squared) : 1.0f;
+    }
+    return model->radius;
+}
+
+/* With --glare, for a ship lined up with the sun: how far the sun's rim
+ * moves a point with camera-space normal (x, y, z) up its ramp. */
+static float GetShip3dSunRim(float silhouette, const float sun[3],
+                             float normalX, float normalY, float normalZ)
+{
+    float edge = 1.0f + normalZ;
+    float facing;
+
+    if (silhouette <= 0.0f)
+        return 0.0f;
+    if (edge > 1.0f)
+        edge = 1.0f;
+    facing = normalX * sun[0] + normalY * sun[1] + normalZ * sun[2] + 0.35f;
+    if (edge <= 0.0f || facing <= 0.0f)
+        return 0.0f;
+    return silhouette * SHIP3D_SILHOUETTE_RIM * SDL_powf(edge, 1.8f) * facing;
+}
+
 int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
 {
     Ship3dModel *model;
@@ -740,6 +787,10 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
     int maxX;
     int maxY;
     int index;
+    float sun[3];
+    float sunColour[3];
+    float silhouette;
+    float keyScale;
 
     if (!g_bShip3dEnabled || viewport == NULL || viewport->pixels == NULL)
         return 0;
@@ -795,6 +846,12 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
     lightY /= lightLength;
     lightZ /= lightLength;
 
+    /* --glare: a ship in front of the sun shows its dark side. */
+    silhouette = SdlGlareSilhouette(centerX, centerY,
+                                    GetShip3dRadius(model) * scale, sun,
+                                    sunColour);
+    keyScale = 1.0f - SHIP3D_SILHOUETTE_KEY * silhouette;
+
     ValidateViewportBounds(viewport, &surface, &clip);
 
     /* Half the screen extent of one voxel cube under this orientation. */
@@ -809,6 +866,7 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
         int recorded = 0;
         int pointCount = 0;
         int trueColour = g_bShip3dTrueColour && model->albedo != NULL;
+        float coverExtent = halfWidth > halfHeight ? halfWidth : halfHeight;
 
         if (g_nShip3dGlPointCapacity < model->count) {
             SDL_free(g_pfShip3dGlPoints);
@@ -848,29 +906,44 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
                       (size_t)pointCount * SHIP3D_GL_POINT_FLOATS;
                 out[0] = centerX + cameraX * scale - 0.5f;
                 out[1] = centerY + cameraY * scale - 0.5f;
+                if (silhouette > 0.0f)
+                    SdlGlareCoverPoint(out[0] + 0.5f, out[1] + 0.5f,
+                                       coverExtent);
                 depth = cameraZ * scale * (1.0f / 8192.0f);
                 out[2] = depth < -0.99f ? -0.99f :
                          depth > 0.99f ? 0.99f : depth;
                 {
                     float facing = normalX * lightX + normalY * lightY +
                                    normalZ * lightZ;
+                    float sunRim = GetShip3dSunRim(silhouette, sun, normalX,
+                                                   normalY, normalZ);
 
                     if (facing < 0.0f)
                         facing = 0.0f;
-                    facing += GetShip3dRim(normalX, normalY, normalZ) +
-                              GetShip3dFresnel(normalZ);
+                    facing = facing * keyScale +
+                             GetShip3dRim(normalX, normalY, normalZ) +
+                             GetShip3dFresnel(normalZ);
+                    if (!trueColour)
+                        facing += sunRim;
                     if (facing > 1.0f)
                         facing = 1.0f;
                     if (trueColour) {
                         const float *albedo = model->albedo + (size_t)index * 3;
                         float lit = 1.0f + model->kappa *
                                                (facing - model->reference);
+                        int channel;
 
                         if (lit < 0.05f || model->unlit[index])
                             lit = model->unlit[index] ? 1.0f : 0.05f;
-                        out[3] = albedo[0] * lit;
-                        out[4] = albedo[1] * lit;
-                        out[5] = albedo[2] * lit;
+                        /* Lined up with the sun, the hull goes dark and the
+                         * sun's own colour rims its edges. */
+                        lit *= 1.0f - SHIP3D_SILHOUETTE_DARKEN * silhouette;
+                        for (channel = 0; channel < 3; channel++) {
+                            float value = albedo[channel] * lit +
+                                          sunColour[channel] * sunRim;
+
+                            out[3 + channel] = value > 1.0f ? 1.0f : value;
+                        }
                     } else {
                         GetShip3dBlend(model->shade +
                                            (size_t)index * model->steps,
@@ -879,6 +952,9 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
                                        out + 3);
                     }
                     out[6] = occlusion != NULL ? occlusion[index] : 1.0f;
+                    if (!trueColour)
+                        out[6] *= 1.0f - SHIP3D_SILHOUETTE_DARKEN * 0.6f *
+                                             silhouette;
                 }
                 pointCount++;
             }

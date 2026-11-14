@@ -592,6 +592,7 @@ MODERN_GAME_HOST_SRCS = \
 	src/sdl/stars.c \
 	src/sdl/backdrop.c \
 	src/sdl/backdroplight.c \
+	src/sdl/glare.c \
 	src/sdl/aspectless.c \
 	src/sdl/fov.c \
 	src/sdl/missionmenu.c \

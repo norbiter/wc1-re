@@ -307,6 +307,14 @@ void SdlBackdropLightNoteObject(short obj, short shapeId,
                                 short definitionIndex);
 short SdlBackdropLightTurnSprite(short obj, short angle);
 int SdlBackdropLightCamera(float light[3]);
+void SdlBackdropLightTrack(void);
+int SdlBackdropGlareSun(float camera[3], short *shapeId, int *size);
+void SdlGlareEnable(void);
+void SdlGlareBeginFrame(void);
+float SdlGlareSilhouette(float x, float y, float radius, float direction[3],
+                         float colour[3]);
+void SdlGlareCoverPoint(float x, float y, float halfExtent);
+void SdlGlareDraw(const struct Viewport *viewport);
 void SdlSmoothEnable(void);
 int SdlSmoothSubFrame(void);
 void SdlSmoothHudBegin(void);

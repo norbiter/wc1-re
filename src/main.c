@@ -2020,8 +2020,13 @@ unsigned int Draw_3Space_Frame(void)
         bCockpitlessView > 0,
         cPrimaryViewBufferColour);
     SdlDustDraw(&stSpaceBufferViewport);
+    SdlGlareBeginFrame();
 #endif
     draw_sorted_objects_to_buffer();
+#ifdef SDL_PORT
+    /* --glare: the sun's haze over everything drawn. */
+    SdlGlareDraw(&stSpaceBufferViewport);
+#endif
     if (nCameraViewMode == 0)
         overlay_head_up_display();
     return 1;

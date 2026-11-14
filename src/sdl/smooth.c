@@ -333,7 +333,9 @@ static void DrawExtraFrame(void)
         bCockpitlessView > 0,
         (unsigned char)cPrimaryViewBufferColour);
     SdlDustDraw(&stSpaceBufferViewport);
+    SdlGlareBeginFrame();
     draw_sorted_objects_to_buffer();
+    SdlGlareDraw(&stSpaceBufferViewport);
     if (nCameraViewMode == 0)
         overlay_head_up_display();
     RestoreCockpitExplosionIfVisible();

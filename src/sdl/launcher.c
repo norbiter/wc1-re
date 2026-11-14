@@ -76,6 +76,8 @@ static void SdlPrintUsage(FILE *stream)
           "                          nebulae at display resolution\n"
           "  --backdrop-light        With --ship3d, light ships' edges from the\n"
           "                          backdrop's sun or lit planet\n"
+          "  --glare                 With --enhanced, a large sun dazzles: a haze\n"
+          "                          round it, and 3D ships before it in silhouette\n"
           "  --ai-throttle[=N]       Tune AI update throttling\n"
           "  --ff                    Suppress friendly fire\n"
           "  --gun-range             Tint the crosshair by effective gun range\n"
@@ -197,6 +199,8 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlFineBackdropEnable();
         } else if (strcmp(argument, "--backdrop-light") == 0) {
             SdlBackdropLightEnable();
+        } else if (strcmp(argument, "--glare") == 0) {
+            SdlGlareEnable();
         } else if (strcmp(argument, "--ai-throttle") == 0) {
             SdlAiThrottleEnable(0);
         } else if (strncmp(argument, "--ai-throttle=", 14) == 0) {

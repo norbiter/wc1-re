@@ -118,11 +118,20 @@ static const BackdropLightTurn g_aBackdropLightTurns[] = {
 };
 
 static int g_bBackdropLightEnabled;
+/* Whether backdrop objects are noted at all: for --backdrop-light, and for
+ * --glare, which asks for the backdrop's sun. */
+static int g_bBackdropTracked;
 static BackdropLightObject g_aBackdropLightObjects[SPACE_OBJECT_COUNT];
 
 void SdlBackdropLightEnable(void)
 {
     g_bBackdropLightEnabled = 1;
+    g_bBackdropTracked = 1;
+}
+
+void SdlBackdropLightTrack(void)
+{
+    g_bBackdropTracked = 1;
 }
 
 static void FixedToUnit(const FixedVector *vector, float out[3])
@@ -185,7 +194,7 @@ void SdlBackdropLightNoteObject(short obj, short shapeId,
         return;
     entry = &g_aBackdropLightObjects[obj];
     memset(entry, 0, sizeof(*entry));
-    if (!g_bBackdropLightEnabled || shapeId < 0 ||
+    if (!g_bBackdropTracked || shapeId < 0 ||
         shapeId >= BACKDROP_LIGHT_SHAPES)
         return;
     look = &g_aBackdropLightShapes[shapeId];
@@ -310,5 +319,39 @@ int SdlBackdropLightCamera(float light[3])
     FixedToUnit(&aShipFwdVec[EYE_OBJECT], eye[2]);
     for (axis = 0; axis < 3; axis++)
         light[axis] = DotLight(best->light, eye[axis]);
+    return 1;
+}
+
+/* The backdrop's largest large sun for --glare: its direction in the eye's
+ * frame, its shape id and the sprite's larger side.  0 when there is none. */
+int SdlBackdropGlareSun(float camera[3], short *shapeId, int *size)
+{
+    const BackdropLightObject *best = 0;
+    float eye[3][3];
+    int obj;
+    int axis;
+
+    if (!g_bBackdropTracked)
+        return 0;
+    for (obj = 0; obj < SPACE_OBJECT_COUNT; obj++) {
+        const BackdropLightObject *entry = &g_aBackdropLightObjects[obj];
+
+        if (entry->shape == 0 || aeObjectClass[obj] != OBJECT_CLASS_PLANET ||
+            apObjShapeArray[obj] != entry->shape ||
+            g_aBackdropLightShapes[entry->shapeId].kind != LIGHT_LARGE_SUN)
+            continue;
+        if (best == 0 || g_aBackdropLightShapes[entry->shapeId].size >
+                             g_aBackdropLightShapes[best->shapeId].size)
+            best = entry;
+    }
+    if (best == 0)
+        return 0;
+    FixedToUnit(&aShipRightVector[EYE_OBJECT], eye[0]);
+    FixedToUnit(&aShipUpVector[EYE_OBJECT], eye[1]);
+    FixedToUnit(&aShipFwdVec[EYE_OBJECT], eye[2]);
+    for (axis = 0; axis < 3; axis++)
+        camera[axis] = DotLight(best->toward, eye[axis]);
+    *shapeId = best->shapeId;
+    *size = g_aBackdropLightShapes[best->shapeId].size;
     return 1;
 }
