@@ -1037,6 +1037,16 @@ void draw_sorted_objects_to_buffer(void)
                                            enhancedScreenX, enhancedScreenY);
                         break;
                     }
+                    /* --fine-backdrop redraws planets and suns at output
+                     * resolution. */
+                    if (SdlFineBackdropDraw(&stSpaceBufferViewport, (short)obj,
+                                            enhancedScreenX, enhancedScreenY,
+                                            objectShape,
+                                            asObjectViewFrames[obj],
+                                            asObjScreenAngles[obj],
+                                            asObjScreenScalesArray[obj],
+                                            asObjectFlipArray[obj]))
+                        break;
                     if (!SdlRecordSpaceSprite(
                             &stSpaceBufferViewport, enhancedScreenX, enhancedScreenY,
                             objectShape,
@@ -1092,6 +1102,11 @@ void draw_sorted_objects_to_buffer(void)
                 } else {
                     shape = pCurrentConstellationShape;
 #ifdef SDL_PORT
+                    /* --fine-stars draws stars at output resolution. */
+                    if (SdlFineStarDraw(&stSpaceBufferViewport, (short)obj,
+                                        enhancedScreenX, enhancedScreenY,
+                                        shape, asObjectViewFrames[obj]))
+                        break;
                     if (!SdlRecordSpaceSprite(
                             &stSpaceBufferViewport, enhancedScreenX,
                             enhancedScreenY, shape,

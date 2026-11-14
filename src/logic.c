@@ -1711,6 +1711,9 @@ unsigned int InitializeConstellationObject(
     apObjShapeArray[object] =
         FetchDiskPacketRetrying(
             12, (definition->shapePacket + 1), 0);
+#ifdef SDL_PORT
+    SdlFineBackdropNoteShape(object, definition->shapePacket);
+#endif
     return 0;
 }
 

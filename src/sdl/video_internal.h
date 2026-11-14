@@ -37,6 +37,14 @@ int SdlGlRendererRecordShip(const struct Viewport *viewport,
 int SdlGlRendererRecordShipOverlay(const struct Viewport *viewport,
                                    const float *vertices, int count,
                                    const float colour[3]);
+int SdlGlRendererRecordColourOverlay(const struct Viewport *viewport,
+                                     const float *vertices, int count);
+int SdlGlRendererCreateImage(int width, int height,
+                             const unsigned char *pixels);
+void SdlGlRendererReleaseImage(int handle);
+unsigned int SdlGlRendererImageGeneration(void);
+int SdlGlRendererRecordImage(const struct Viewport *viewport, int handle,
+                             const float corners[8], const float tint[3]);
 int SdlConfigureVideoWindow(Uint32 *windowFlags);
 void SdlCalculateOutputViewport(int width, int height, int *left,
                                    int *bottom, int *viewportWidth,

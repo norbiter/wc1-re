@@ -208,6 +208,10 @@ typedef struct GlSprite {
     /* Nonzero when the ship's points carry RGB (0..1) in the palette fields
        instead of palette entries and a blend. */
     int shipTrueColour;
+    /* Nonzero for an image overlay: one more than the slot of the RGBA image
+       its triangles sample, with the u, v in the first two colour floats and
+       overlayColour as a tint. */
+    int imageSlot;
 } GlSprite;
 
 typedef struct GlShipPoint {
@@ -241,6 +245,18 @@ typedef enum GlFrameState {
 #define GL_RENDERER_SPRITE_ATLAS_PADDING 1
 #define GL_RENDERER_CACHED_FRAME_CAPACITY 2048
 #define GL_RENDERER_SHIP_POINT_LIMIT (1U << 21)
+#define GL_RENDERER_IMAGE_CAPACITY 32
+
+/* An RGBA image (premultiplied) drawn by image overlays.  The pixels wait in
+   pending until the next frame is drawn, where the context is current. */
+typedef struct GlImage {
+    int used;
+    int release;
+    GLuint texture;
+    int width;
+    int height;
+    unsigned char *pending;
+} GlImage;
 
 static const GLchar g_vertexShaderSource[] =
     "#version 150\n"
@@ -355,9 +371,11 @@ static const GLchar g_shipVertexShaderSource[] =
     "uniform int u_overlay;\n"
     "uniform vec3 u_overlayColour;\n"
     "uniform int u_trueColour;\n"
+    "uniform int u_image;\n"
     "uniform vec4 u_frame;\n"
     "out vec3 v_colour;\n"
     "out float v_alpha;\n"
+    "out vec2 v_uv;\n"
     "void main()\n"
     "{\n"
     "    vec2 position;\n"
@@ -376,6 +394,15 @@ static const GLchar g_shipVertexShaderSource[] =
     "    if (u_overlay != 0) {\n"
     "        v_colour = u_overlayColour;\n"
     "        v_alpha = a_shipColour.z;\n"
+    "        if (u_trueColour != 0) {\n"
+    "            v_colour = a_shipColour;\n"
+    "            v_alpha = a_shipBrightness;\n"
+    "        }\n"
+    "    }\n"
+    "    v_uv = a_shipColour.xy;\n"
+    "    if (u_image != 0) {\n"
+    "        v_colour = u_overlayColour;\n"
+    "        v_alpha = 1.0;\n"
     "    }\n"
     "}\n";
 
@@ -383,7 +410,8 @@ static const GLchar g_shipVertexShaderSource[] =
    vertex shader reads the palette every frame, so palette fades act on ships
    and the shading between ramp entries is continuous.  True-colour runs
    carry RGB instead and do not follow palette fades.  Overlay runs carry an
-   opacity instead. */
+   opacity instead.  Image runs sample a premultiplied RGBA image at the
+   carried u, v and scale its colour by a tint. */
 static const GLchar g_shipFragmentShaderSource[] =
     "#version 150\n"
     "uniform sampler2D u_baseIndices;\n"
@@ -391,8 +419,11 @@ static const GLchar g_shipFragmentShaderSource[] =
     "uniform int u_clearIndex;\n"
     "uniform vec4 u_viewport;\n"
     "uniform vec4 u_clip;\n"
+    "uniform int u_image;\n"
+    "uniform sampler2D u_imageTexture;\n"
     "in vec3 v_colour;\n"
     "in float v_alpha;\n"
+    "in vec2 v_uv;\n"
     "out vec4 outputColour;\n"
     "void main()\n"
     "{\n"
@@ -415,6 +446,11 @@ static const GLchar g_shipFragmentShaderSource[] =
     "    if (baseIndex != u_clearIndex)\n"
     "        discard;\n"
     "    outputColour = vec4(v_colour * v_alpha, v_alpha);\n"
+    "    if (u_image != 0) {\n"
+    "        vec4 image = texture(u_imageTexture, v_uv);\n"
+    "        outputColour = vec4(\n"
+    "            min(image.rgb * v_colour, vec3(image.a)), image.a);\n"
+    "    }\n"
     "}\n";
 
 typedef struct GlRenderer {
@@ -438,6 +474,8 @@ typedef struct GlRenderer {
     GLint shipOverlayUniform;
     GLint shipOverlayColourUniform;
     GLint shipTrueColourUniform;
+    GLint shipImageUniform;
+    GLint shipImageTextureUniform;
     GLint shipFrameUniform;
     GLint baseFrameUniform;
     GLint spriteFrameUniform;
@@ -480,12 +518,16 @@ typedef struct GlRenderer {
     unsigned char spaceFrameBase[SDL_PORT_FRAME_WIDTH * SDL_PORT_FRAME_HEIGHT];
     unsigned char presentedFrame[SDL_PORT_FRAME_WIDTH * SDL_PORT_FRAME_HEIGHT];
     unsigned char presentedPalette[256 * 4];
+    GlImage images[GL_RENDERER_IMAGE_CAPACITY];
     GlCachedFrame cachedFrames[GL_RENDERER_CACHED_FRAME_CAPACITY];
     GlSprite recordedSprites[GL_RENDERER_RECORDED_SPRITE_CAPACITY];
     GlVertex spriteVertices[GL_RENDERER_SPRITE_VERTEX_COUNT];
 } GlRenderer;
 
 static GlRenderer g_renderer;
+/* Counts renderer starts, so image owners can tell that their images went
+   with an earlier context. */
+static unsigned int g_uGlImageGeneration;
 
 static void ResetRecordedSprites(void)
 {
@@ -502,6 +544,12 @@ static void ResetSpriteAtlasCache(void)
 
 static void ReleaseRendererStorage(void)
 {
+    int slot;
+
+    for (slot = 0; slot < GL_RENDERER_IMAGE_CAPACITY; slot++) {
+        free(g_renderer.images[slot].pending);
+        g_renderer.images[slot].pending = 0;
+    }
     free(g_renderer.decodeScratch);
     g_renderer.decodeScratch = 0;
     free(g_renderer.shipPoints);
@@ -750,6 +798,10 @@ static int LoadGlUniformLocations(void)
         g_renderer.shipProgram, "u_trueColour");
     g_renderer.shipFrameUniform = g_renderer.gl.GetUniformLocation(
         g_renderer.shipProgram, "u_frame");
+    g_renderer.shipImageUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.shipProgram, "u_image");
+    g_renderer.shipImageTextureUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.shipProgram, "u_imageTexture");
     g_renderer.baseFrameUniform = g_renderer.gl.GetUniformLocation(
         g_renderer.baseProgram, "u_frame");
     g_renderer.spriteFrameUniform = g_renderer.gl.GetUniformLocation(
@@ -762,6 +814,8 @@ static int LoadGlUniformLocations(void)
         g_renderer.shipOverlayUniform < 0 ||
         g_renderer.shipOverlayColourUniform < 0 ||
         g_renderer.shipTrueColourUniform < 0 ||
+        g_renderer.shipImageUniform < 0 ||
+        g_renderer.shipImageTextureUniform < 0 ||
         g_renderer.shipFrameUniform < 0) {
         fprintf(stderr, "OpenGL ship uniforms are unavailable.\n");
         return 0;
@@ -1131,6 +1185,51 @@ static void DrawSpriteRun(unsigned int first, unsigned int end)
     g_renderer.gl.Disable(GL_BLEND);
 }
 
+/* Creates the texture of an image whose pixels are still waiting. */
+static int UploadGlImage(GlImage *image)
+{
+    if (image->pending == 0)
+        return image->texture != 0;
+    if (image->texture == 0)
+        g_renderer.gl.GenTextures(1, &image->texture);
+    if (image->texture == 0)
+        return 0;
+    g_renderer.gl.ActiveTexture(GL_TEXTURE4);
+    g_renderer.gl.BindTexture(GL_TEXTURE_2D, image->texture);
+    g_renderer.gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                                GL_LINEAR);
+    g_renderer.gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                                GL_LINEAR);
+    g_renderer.gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+                                GL_CLAMP_TO_EDGE);
+    g_renderer.gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+                                GL_CLAMP_TO_EDGE);
+    g_renderer.gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    g_renderer.gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, image->width,
+                             image->height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                             image->pending);
+    free(image->pending);
+    image->pending = 0;
+    return 1;
+}
+
+/* Deletes the textures of images given up since the last frame. */
+static void ReleaseGlImages(void)
+{
+    int slot;
+
+    for (slot = 0; slot < GL_RENDERER_IMAGE_CAPACITY; slot++) {
+        GlImage *image = &g_renderer.images[slot];
+
+        if (!image->release)
+            continue;
+        if (image->texture != 0)
+            g_renderer.gl.DeleteTextures(1, &image->texture);
+        free(image->pending);
+        memset(image, 0, sizeof(*image));
+    }
+}
+
 /* Ships are opaque points with their own depth test.  The depth buffer is
    cleared per ship so painter ordering between objects is untouched. */
 static void DrawRecordedShip(const GlSprite *ship, float outputScale,
@@ -1175,6 +1274,17 @@ static void DrawRecordedShip(const GlSprite *ship, float outputScale,
     g_renderer.gl.Uniform3f(g_renderer.shipOverlayColourUniform,
                             ship->overlayColour[0], ship->overlayColour[1],
                             ship->overlayColour[2]);
+    g_renderer.gl.Uniform1i(g_renderer.shipImageUniform,
+                            ship->imageSlot != 0);
+    if (ship->imageSlot != 0) {
+        GlImage *image = &g_renderer.images[ship->imageSlot - 1];
+
+        if (!image->used || !UploadGlImage(image))
+            return;
+        g_renderer.gl.ActiveTexture(GL_TEXTURE4);
+        g_renderer.gl.BindTexture(GL_TEXTURE_2D, image->texture);
+        g_renderer.gl.Uniform1i(g_renderer.shipImageTextureUniform, 4);
+    }
     if (ship->shipOverlay) {
         g_renderer.gl.Enable(GL_BLEND);
         g_renderer.gl.BlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
@@ -1279,6 +1389,7 @@ static int RenderGlFrame(const unsigned char *pixels,
         UploadIndexTexture(g_renderer.maskTexture, g_renderer.frameWidth,
                            g_renderer.frameHeight, mask);
     }
+    ReleaseGlImages();
     g_renderer.gl.Viewport(0, 0, drawableWidth, drawableHeight);
     g_renderer.gl.ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     g_renderer.gl.Clear(GL_COLOR_BUFFER_BIT);
@@ -1349,6 +1460,7 @@ int SdlGlRendererInitialize(SDL_Window *window)
     if (window == 0)
         return 0;
     g_renderer.window = window;
+    g_uGlImageGeneration++;
     g_renderer.context = SDL_GL_CreateContext(window);
     if (g_renderer.context == 0) {
         fprintf(stderr, "OpenGL context creation failed: %s\n",
@@ -1479,8 +1591,8 @@ void SdlGlRendererShutdown(void)
 {
     GLuint textures[4];
     int canDeleteResources;
+    int slot;
 
-    ReleaseRendererStorage();
     canDeleteResources =
         g_renderer.context != 0 && g_renderer.window != 0 &&
         SDL_GL_MakeCurrent(g_renderer.window, g_renderer.context) == 0;
@@ -1490,6 +1602,11 @@ void SdlGlRendererShutdown(void)
         textures[2] = g_renderer.maskTexture;
         textures[3] = g_renderer.spriteAtlasTexture;
         g_renderer.gl.DeleteTextures(4, textures);
+        for (slot = 0; slot < GL_RENDERER_IMAGE_CAPACITY; slot++) {
+            if (g_renderer.images[slot].texture != 0)
+                g_renderer.gl.DeleteTextures(
+                    1, &g_renderer.images[slot].texture);
+        }
     }
     if (canDeleteResources && g_renderer.gl.DeleteBuffers != 0 &&
         g_renderer.vertexBuffer != 0) {
@@ -1515,6 +1632,7 @@ void SdlGlRendererShutdown(void)
         if (g_renderer.shipProgram != 0)
             g_renderer.gl.DeleteProgram(g_renderer.shipProgram);
     }
+    ReleaseRendererStorage();
     if (g_renderer.context != 0)
         SDL_GL_DeleteContext(g_renderer.context);
     memset(&g_renderer, 0, sizeof(g_renderer));
@@ -1729,6 +1847,93 @@ int SdlGlRendererRecordShipOverlay(const Viewport *viewport,
                                    const float colour[3])
 {
     return RecordShipVertices(viewport, vertices, count, 6, 0.0f, 0, colour);
+}
+
+/* Records a translucent overlay whose colour varies per vertex: count
+ * vertices, three per triangle, of seven floats each: x, y, an unused
+ * depth, RGB (0..1) and the opacity (0..1). */
+int SdlGlRendererRecordColourOverlay(const Viewport *viewport,
+                                     const float *vertices, int count)
+{
+    static const float unused[3] = { 1.0f, 1.0f, 1.0f };
+
+    return RecordShipVertices(viewport, vertices, count, 7, 0.0f, 1, unused);
+}
+
+/* Takes a copy of a premultiplied RGBA image for image overlays.  Returns a
+ * handle, or 0 when no slot is free.  The handle lasts until it is
+ * released or the renderer stops; SdlGlRendererImageGeneration tells which. */
+int SdlGlRendererCreateImage(int width, int height,
+                             const unsigned char *pixels)
+{
+    size_t size;
+    int slot;
+
+    if (width <= 0 || height <= 0 || pixels == 0 ||
+        g_renderer.context == 0)
+        return 0;
+    for (slot = 0; slot < GL_RENDERER_IMAGE_CAPACITY; slot++) {
+        if (!g_renderer.images[slot].used)
+            break;
+    }
+    if (slot == GL_RENDERER_IMAGE_CAPACITY)
+        return 0;
+    size = (size_t)width * (size_t)height * 4U;
+    g_renderer.images[slot].pending = malloc(size);
+    if (g_renderer.images[slot].pending == 0)
+        return 0;
+    memcpy(g_renderer.images[slot].pending, pixels, size);
+    g_renderer.images[slot].used = 1;
+    g_renderer.images[slot].release = 0;
+    g_renderer.images[slot].width = width;
+    g_renderer.images[slot].height = height;
+    return slot + 1;
+}
+
+/* Gives an image up; its texture goes when the next frame is drawn. */
+void SdlGlRendererReleaseImage(int handle)
+{
+    if (handle <= 0 || handle > GL_RENDERER_IMAGE_CAPACITY)
+        return;
+    if (g_renderer.images[handle - 1].used)
+        g_renderer.images[handle - 1].release = 1;
+}
+
+unsigned int SdlGlRendererImageGeneration(void)
+{
+    return g_uGlImageGeneration;
+}
+
+/* Records an image overlay: the image mapped onto a quad whose corners
+ * (x, y pairs) take the image's top left, bottom left, top right and bottom
+ * right, its colour scaled by tint. */
+int SdlGlRendererRecordImage(const Viewport *viewport, int handle,
+                             const float corners[8], const float tint[3])
+{
+    float vertices[6 * 7];
+    static const int order[6] = { 0, 1, 2, 2, 1, 3 };
+    int index;
+
+    if (handle <= 0 || handle > GL_RENDERER_IMAGE_CAPACITY ||
+        !g_renderer.images[handle - 1].used ||
+        g_renderer.images[handle - 1].release)
+        return 0;
+    for (index = 0; index < 6; index++) {
+        float *vertex = vertices + index * 7;
+        int corner = order[index];
+
+        vertex[0] = corners[corner * 2];
+        vertex[1] = corners[corner * 2 + 1];
+        vertex[2] = 0.0f;
+        vertex[3] = (corner & 2) != 0 ? 1.0f : 0.0f;
+        vertex[4] = (corner & 1) != 0 ? 1.0f : 0.0f;
+        vertex[5] = 0.0f;
+        vertex[6] = 1.0f;
+    }
+    if (!RecordShipVertices(viewport, vertices, 6, 7, 0.0f, 1, tint))
+        return 0;
+    g_renderer.recordedSprites[g_renderer.spriteCount - 1].imageSlot = handle;
+    return 1;
 }
 
 int SdlGlRendererPresent(const unsigned char *pixels,

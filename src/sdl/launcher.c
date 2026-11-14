@@ -70,6 +70,10 @@ static void SdlPrintUsage(FILE *stream)
           "  --shield-flash          Flash a hemisphere over a ship when its shields take a hit\n"
           "  --smooth                Smooth frame interpolation\n"
           "  --dust                  Fine space dust that streaks with speed\n"
+          "  --fine-stars            With --enhanced, draw stars as sharp points\n"
+          "                          of light with glare\n"
+          "  --fine-backdrop         With --enhanced, redraw planets, suns and\n"
+          "                          nebulae at display resolution\n"
           "  --ai-throttle[=N]       Tune AI update throttling\n"
           "  --ff                    Suppress friendly fire\n"
           "  --gun-range             Tint the crosshair by effective gun range\n"
@@ -185,6 +189,10 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlSmoothEnable();
         } else if (strcmp(argument, "--dust") == 0) {
             SdlDustEnable();
+        } else if (strcmp(argument, "--fine-stars") == 0) {
+            SdlFineStarsEnable();
+        } else if (strcmp(argument, "--fine-backdrop") == 0) {
+            SdlFineBackdropEnable();
         } else if (strcmp(argument, "--ai-throttle") == 0) {
             SdlAiThrottleEnable(0);
         } else if (strncmp(argument, "--ai-throttle=", 14) == 0) {

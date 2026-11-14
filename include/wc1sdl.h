@@ -294,6 +294,14 @@ int SdlHitSphereEnabled(void);
 void SdlDustEnable(void);
 int SdlDustHidesObject(short obj);
 void SdlDustDraw(struct Viewport *viewport);
+void SdlFineStarsEnable(void);
+int SdlFineStarDraw(const struct Viewport *viewport, short obj, float x,
+                    float y, struct Shape *shape, short frame);
+void SdlFineBackdropEnable(void);
+void SdlFineBackdropNoteShape(short obj, short shapeId);
+int SdlFineBackdropDraw(const struct Viewport *viewport, short obj, float x,
+                        float y, struct Shape *shape, short frame,
+                        short angle, short scale, short flip);
 void SdlSmoothEnable(void);
 int SdlSmoothSubFrame(void);
 void SdlSmoothHudBegin(void);
