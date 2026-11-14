@@ -1713,6 +1713,9 @@ unsigned int InitializeConstellationObject(
             12, (definition->shapePacket + 1), 0);
 #ifdef SDL_PORT
     SdlFineBackdropNoteShape(object, definition->shapePacket);
+    SdlBackdropLightNoteObject(object, definition->shapePacket,
+                               (short)(definition -
+                                       pConstellationDefinitionsPtr));
 #endif
     return 0;
 }

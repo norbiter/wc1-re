@@ -1413,6 +1413,10 @@ void set_background_objects_rotation(short obj, FixedVector *direction)
     angle %= 360;
     if (projectedUp.x >= 0)
         angle = 360 - angle;
+#ifdef SDL_PORT
+    /* --backdrop-light may turn a planet to face its series' sun. */
+    angle = SdlBackdropLightTurnSprite(obj, angle);
+#endif
     asObjScreenAngles[obj] = angle;
     asObjScreenScalesArray[obj] = 0xff;
 }

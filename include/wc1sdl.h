@@ -302,6 +302,11 @@ void SdlFineBackdropNoteShape(short obj, short shapeId);
 int SdlFineBackdropDraw(const struct Viewport *viewport, short obj, float x,
                         float y, struct Shape *shape, short frame,
                         short angle, short scale, short flip);
+void SdlBackdropLightEnable(void);
+void SdlBackdropLightNoteObject(short obj, short shapeId,
+                                short definitionIndex);
+short SdlBackdropLightTurnSprite(short obj, short angle);
+int SdlBackdropLightCamera(float light[3]);
 void SdlSmoothEnable(void);
 int SdlSmoothSubFrame(void);
 void SdlSmoothHudBegin(void);

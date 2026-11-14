@@ -26,7 +26,9 @@
  * of it the hull itself closes off.  In the GL layer it scales the point's
  * colour; in the 8-bit frame it scales the point's place on its ramp.  Edge
  * lighting is a rim light from camera-space (+1, +1, +1), behind the ship to
- * the lower right, on surfaces turned edge-on to the viewer.  It moves the
+ * the lower right, on surfaces turned edge-on to the viewer; with
+ * --backdrop-light it comes from the backdrop's sun or lit planet instead
+ * (backdroplight.c).  It moves the
  * point up its own ramp, so it stays in the ship's colours and still follows
  * palette fades.  A Fresnel term does the same, from no particular light,
  * on surfaces seen almost exactly edge-on, which outlines the hull faintly.
@@ -461,12 +463,19 @@ static const float *GetShip3dOcclusion(Ship3dModel *model, int type)
     return model->occlusion;
 }
 
+/* Towards the rim light in camera space, unit length: (+1, +1, +1) unless
+ * the backdrop sets it for this frame. */
+static float g_afShip3dRimLight[3] = { 0.57735027f, 0.57735027f,
+                                       0.57735027f };
+
 /* How far up its ramp the rim light moves a point with camera-space normal
- * (x, y, z); the light comes from (+1, +1, +1). */
+ * (x, y, z). */
 static float GetShip3dRim(float normalX, float normalY, float normalZ)
 {
     float edge = 1.0f + normalZ; /* 1 - n.v, the viewer at -z */
-    float facing = (normalX + normalY + normalZ) * 0.57735027f;
+    float facing = normalX * g_afShip3dRimLight[0] +
+                   normalY * g_afShip3dRimLight[1] +
+                   normalZ * g_afShip3dRimLight[2];
 
     if (edge > 1.0f)
         edge = 1.0f;
@@ -767,6 +776,11 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
     }
 
     SdlShip3dComputeBasis(obj, basis);
+    if (!SdlBackdropLightCamera(g_afShip3dRimLight)) {
+        g_afShip3dRimLight[0] = 0.57735027f;
+        g_afShip3dRimLight[1] = 0.57735027f;
+        g_afShip3dRimLight[2] = 0.57735027f;
+    }
 
     /* Unit vector from the surface towards the light, in camera space
      * (x right, y down, z forward): above, left of and behind the viewer.
