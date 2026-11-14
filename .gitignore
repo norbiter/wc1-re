@@ -49,3 +49,6 @@ __pycache__/
 *$py.class
 
 .DS_Store
+
+# Generated ship data
+ship3d
