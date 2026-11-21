@@ -268,6 +268,7 @@ int SdlRecordSpaceSprite(
 void SdlShip3dEnable(const char *directory);
 int SdlShip3dEnabled(void);
 void SdlShip3dEnableTrueColour(void);
+void SdlRock3dEnable(void);
 int SdlShip3dDraw(struct Viewport *viewport, short obj, float centerX,
                   float centerY);
 void SdlShip3dShutdown(void);
@@ -323,6 +324,7 @@ void SdlTtfTextBeginGlyph(const struct TextContext *context,
 void SdlTtfTextEndGlyph(const struct TextContext *context);
 void SdlSmoothEnable(void);
 int SdlSmoothSubFrame(void);
+double SdlSmoothFraction(void);
 void SdlSmoothHudBegin(void);
 void SdlSmoothHudEnd(void);
 void SdlSmoothBeginPresent(int index);

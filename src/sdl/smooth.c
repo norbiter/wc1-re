@@ -32,6 +32,8 @@
 
 static int g_bSmoothEnabled;
 static int g_bSmoothSubFrame;
+/* How far (0..1) past the sim's tick the frame being drawn is. */
+static double g_dSmoothFraction;
 
 typedef struct SmoothSavedState {
     FixedVector positions[SPACE_OBJECT_COUNT];
@@ -61,6 +63,11 @@ void SdlSmoothEnable(void)
 int SdlSmoothSubFrame(void)
 {
     return g_bSmoothSubFrame;
+}
+
+double SdlSmoothFraction(void)
+{
+    return g_bSmoothSubFrame ? g_dSmoothFraction : 0.0;
 }
 
 static int SmoothEligible(void)
@@ -362,6 +369,7 @@ int SdlSmoothFlightSubFrames(void)
         SaveState();
         AdvanceWorld((double)index / SMOOTH_SUBFRAMES);
         RemoveFixedChildren();
+        g_dSmoothFraction = (double)index / SMOOTH_SUBFRAMES;
         g_bSmoothSubFrame = 1;
         DrawExtraFrame();
         g_bSmoothSubFrame = 0;

@@ -66,6 +66,7 @@ static void SdlPrintUsage(FILE *stream)
           "  --enhanced              Experimental GL sharp-bilinear rendering\n"
           "  --ship3d[=PATH]         Render ships as 3D models\n"
           "  --ship3d-truecolour     With --enhanced, shade 3D ships in true colour\n"
+          "  --rock3d                Render asteroids as tumbling 3D models\n"
           "  --hitspheres            Show ship hit spheres\n"
           "  --shield-flash          Flash a hemisphere over a ship when its shields take a hit\n"
           "  --smooth                Smooth frame interpolation\n"
@@ -185,6 +186,8 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlShip3dEnable(NULL);
         } else if (strncmp(argument, "--ship3d=", 9) == 0) {
             SdlShip3dEnable(argument + 9);
+        } else if (strcmp(argument, "--rock3d") == 0) {
+            SdlRock3dEnable();
         } else if (strcmp(argument, "--ship3d-truecolour") == 0) {
             SdlShip3dEnableTrueColour();
         } else if (strcmp(argument, "--hitspheres") == 0) {

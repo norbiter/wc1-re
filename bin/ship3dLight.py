@@ -30,6 +30,20 @@ little-endian) holds:
 Version 3 is written for the quantised-RGB model.  Its extra fields let the
 GL layer shade in true colour, without snapping to the palette.
 
+Rock exports (ROCK_nn.npz, carved from the asteroid tumble frames) have a
+third model, a grey fitted light (albedo, ambient, diffuse, axis, step):
+      lum = albedo * (ambient + diffuse * n.L)
+in the units of LUM.  They carry no hue, so the renderer takes the colours
+from the palette entries the rock's own sprite uses, and the sidecar is
+version 4:
+
+    char[4]   "S3DL"
+    uint32    4, uint32 point count, uint32 steps
+    float32   ambient, diffuse
+    float32   axis[3], step            tumble axis (rock frame, unit length)
+                                       and radians per sprite frame
+    float32   albedo[count]
+
 Points no sprite saw keep their stored grey under any light.  Because the
 renderer emits palette indices rather than RGB, the game's own palette fades
 act on the ships unchanged.
@@ -200,6 +214,17 @@ def convert(npz_path, palette):
         for axis in range(3):
             if abs(ply[i][axis] - arrays["pts"][1][i * 3 + axis]) > 1e-3:
                 raise ValueError("point order differs from the PLY")
+
+    if "ambient" in arrays:
+        out = bytearray(b"S3DL")
+        out += struct.pack("<III", 4, count, STEPS)
+        out += struct.pack("<ff", arrays["ambient"][1][0], arrays["diffuse"][1][0])
+        out += struct.pack("<3f", *arrays["axis"][1])
+        out += struct.pack("<f", arrays["step"][1][0])
+        out += struct.pack("<%df" % count, *arrays["albedo"][1])
+        with open(npz_path[:-4] + ".light", "wb") as f:
+            f.write(out)
+        return "fitted light (rock)", count, 0
 
     # At n.L = c the model reproduces the stored (PLY) colour; `wrong`
     # counts the points where it does not, which should be none.

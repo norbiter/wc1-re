@@ -40,7 +40,20 @@
  * palette entry.  Those colours do not follow palette fades.
  *
  * Points are splatted into the 8-bit space buffer with a per-ship depth
- * buffer. */
+ * buffer.
+ *
+ * --rock3d draws the asteroids the same way, from ROCK_nn.ply where nn is the
+ * OBJECTS.VGA packet of the tumble frames (16 for ASTEROID1/3/5 and the rock
+ * chunks, 17 for ASTEROID2/4/6).  Those clouds were carved from one turn of
+ * the tumble, so their frame is the camera frame of sprite frame 0 and their
+ * version 4 sidecar holds a grey fitted light, the tumble axis and the turn
+ * per frame.  The hue comes from the palette entries the rock's own sprite
+ * uses: each point's shade table takes, at each n.L, the entry nearest in
+ * GAME.PAL luminance to albedo * (ambient + diffuse * n.L).  A rock tumbles
+ * about that axis at the rate and in the direction its animation steps
+ * through the frames, interpolated between frames and across --smooth
+ * frames, and every rock slot gets its own fixed attitude and phase so the
+ * field does not turn in step. */
 #include "wc1.h"
 
 #include "video_internal.h"
@@ -116,10 +129,20 @@ typedef struct Ship3dModel {
     int occlusionTried;
     /* The farthest point from the origin, for --glare; 0 until measured. */
     float radius;
+    /* Version 4 (rock) sidecars: grey albedo per point, the fitted light,
+     * the tumble axis and radians per frame.  shade stays NULL until the
+     * rock's sprite has given it its colours; rockShadeTried is set then. */
+    float *rockAlbedo;
+    float rockAmbient;
+    float rockDiffuse;
+    float rockAxis[3];
+    float rockStep;
+    int rockShadeTried;
 } Ship3dModel;
 
 static char g_szShip3dDirectory[1024];
 static int g_bShip3dEnabled;
+static int g_bRock3dEnabled;
 static int g_bShip3dTrueColour;
 static Ship3dModel g_aShip3dModels[SHIP3D_TYPE_COUNT];
 static float *g_pfShip3dDepth;
@@ -143,9 +166,16 @@ void SdlShip3dEnable(const char *directory)
     g_bShip3dEnabled = 1;
 }
 
+/* --rock3d on its own reads the models from ./ship3d. */
+void SdlRock3dEnable(void)
+{
+    g_bRock3dEnabled = 1;
+}
+
+/* Nonzero when any objects are drawn from point clouds. */
 int SdlShip3dEnabled(void)
 {
-    return g_bShip3dEnabled;
+    return g_bShip3dEnabled || g_bRock3dEnabled;
 }
 
 void SdlShip3dEnableTrueColour(void)
@@ -159,7 +189,7 @@ void SdlShip3dEnableTrueColour(void)
  * the ships into the GL layer. */
 int SdlShip3dUsesGl(void)
 {
-    return g_bShip3dEnabled && SdlUsingGlRenderer() &&
+    return SdlShip3dEnabled() && SdlUsingGlRenderer() &&
            !SdlHitSphereEnabled() && !SdlEgaDitherEnabled();
 }
 
@@ -306,6 +336,39 @@ static int LoadShip3dLight(Ship3dModel *model, const char *plyPath,
     }
     version = size >= 16 ? ReadShip3dWord(data + 4) : 0;
     steps = size >= 16 ? ReadShip3dWord(data + 12) : 0;
+    if (version == 4) {
+        /* A rock: the shade tables wait for its sprite's colours. */
+        int index;
+
+        if (SDL_memcmp(data, "S3DL", 4) != 0 ||
+            ReadShip3dWord(data + 8) != (unsigned int)model->count ||
+            steps < 2 || steps > SHIP3D_MAX_SHADE_STEPS ||
+            size != 40 + (size_t)model->count * sizeof(float)) {
+            fprintf(stderr,
+                    "ship3d: %s does not match its model; rerun "
+                    "bin/ship3dLight.py\n",
+                    path);
+            SDL_free(data);
+            return 0;
+        }
+        model->rockAlbedo = SDL_malloc((size_t)model->count * sizeof(float));
+        if (model->rockAlbedo == NULL) {
+            SDL_free(data);
+            return 0;
+        }
+        model->steps = (int)steps;
+        model->rockAmbient = ReadShip3dFloat(data + 16);
+        model->rockDiffuse = ReadShip3dFloat(data + 20);
+        model->rockAxis[0] = ReadShip3dFloat(data + 24);
+        model->rockAxis[1] = ReadShip3dFloat(data + 28);
+        model->rockAxis[2] = ReadShip3dFloat(data + 32);
+        model->rockStep = ReadShip3dFloat(data + 36);
+        for (index = 0; index < model->count; index++)
+            model->rockAlbedo[index] =
+                ReadShip3dFloat(data + 40 + (size_t)index * 4);
+        SDL_free(data);
+        return 1;
+    }
     header = version == 3 ? 24 : 16;
     expected = header + (size_t)model->count * steps;
     if (version == 3)
@@ -508,6 +571,26 @@ static float GetShip3dFresnel(float normalZ)
     return SHIP3D_FRESNEL_STRENGTH * squared * squared * edge;
 }
 
+/* The OBJECTS.VGA packet whose tumble frames type draws, or 0 if it is not
+ * a rock.  load_ship gives ASTEROID1/3/5 packet 16 and ASTEROID2/4/6 packet
+ * 17; set_objects_data turns 2/4/6 into 1/3/5 when packet 17 is not loaded,
+ * and draws the rock chunks with ASTEROID1's frames. */
+static int GetRock3dPacket(int type)
+{
+    switch (type) {
+    case OBJECT_TYPE_ASTEROID1:
+    case OBJECT_TYPE_ASTEROID3:
+    case OBJECT_TYPE_ASTEROID5:
+    case OBJECT_TYPE_ROCK_CHUNK:
+        return 16;
+    case OBJECT_TYPE_ASTEROID2:
+    case OBJECT_TYPE_ASTEROID4:
+    case OBJECT_TYPE_ASTEROID6:
+        return 17;
+    }
+    return 0;
+}
+
 static void LoadShip3dModel(int type)
 {
     Ship3dModel *model;
@@ -523,10 +606,14 @@ static void LoadShip3dModel(int type)
     model->tried = 1;
     /* Retail keeps capital ships in SHIP.Vnn and fighters (and the Spikeri)
      * in SHIPTYPE.Vnn; the models follow the same split. */
-    SDL_snprintf(path, sizeof(path), "%s/SHIP_V%02d.ply",
-                 g_szShip3dDirectory, type);
+    if (GetRock3dPacket(type) != 0)
+        SDL_snprintf(path, sizeof(path), "%s/ROCK_%02d.ply",
+                     g_szShip3dDirectory, GetRock3dPacket(type));
+    else
+        SDL_snprintf(path, sizeof(path), "%s/SHIP_V%02d.ply",
+                     g_szShip3dDirectory, type);
     data = ReadShip3dFile(path, &size);
-    if (data == NULL) {
+    if (data == NULL && GetRock3dPacket(type) == 0) {
         SDL_snprintf(path, sizeof(path), "%s/SHIPTYPE_V%02d.ply",
                      g_szShip3dDirectory, type);
         data = ReadShip3dFile(path, &size);
@@ -585,8 +672,16 @@ static const Ship3dModel *GetShip3dModel(int type)
     if (type < 0 || type >= SHIP3D_TYPE_COUNT)
         return NULL;
     model = &g_aShip3dModels[type];
-    if (!model->tried)
+    if (!model->tried) {
+        if (g_szShip3dDirectory[0] == '\0') {
+#ifndef _WIN32
+            if (realpath("ship3d", g_szShip3dDirectory) == NULL)
+#endif
+                SDL_strlcpy(g_szShip3dDirectory, "ship3d",
+                            sizeof(g_szShip3dDirectory));
+        }
         LoadShip3dModel(type);
+    }
     return model->count > 0 ? model : NULL;
 }
 
@@ -710,13 +805,6 @@ int SdlShip3dGetPoints(int type, const float **xyz, int *stride, int *count)
 {
     const Ship3dModel *model;
 
-    if (g_szShip3dDirectory[0] == '\0') {
-#ifndef _WIN32
-        if (realpath("ship3d", g_szShip3dDirectory) == NULL)
-#endif
-            SDL_strlcpy(g_szShip3dDirectory, "ship3d",
-                        sizeof(g_szShip3dDirectory));
-    }
     model = GetShip3dModel(type);
     if (model == NULL)
         return 0;
@@ -764,6 +852,245 @@ static float GetShip3dSunRim(float silhouette, const float sun[3],
     return silhouette * SHIP3D_SILHOUETTE_RIM * SDL_powf(edge, 1.8f) * facing;
 }
 
+/* The largest tumble frame read for its colours. */
+#define ROCK3D_MAX_SPRITE_PIXELS (256 * 256)
+/* Entries covering less than 1/ROCK3D_RARE_ENTRY of the sprite's pixels are
+ * strays, not part of the rock's ramp. */
+#define ROCK3D_RARE_ENTRY 500
+/* Luminance lookup: quarter steps from 0 to 511.75. */
+#define ROCK3D_LUM_STEPS 2048
+
+/* For a rock drawn as a point cloud, the model slot it uses (ASTEROID1 for
+ * packet 16, ASTEROID2 for packet 17); otherwise -1. */
+static int GetRock3dModelType(short obj)
+{
+    int packet;
+
+    if (!g_bRock3dEnabled || SdlSwcFlightActive())
+        return -1;
+    if (aeObjectClass[obj] != OBJECT_CLASS_ASTEROID &&
+        aeObjectTypeList[obj] != OBJECT_TYPE_ROCK_CHUNK)
+        return -1;
+    packet = GetRock3dPacket(aeObjectTypeList[obj]);
+    if (packet == 16)
+        return OBJECT_TYPE_ASTEROID1;
+    if (packet == 17)
+        return OBJECT_TYPE_ASTEROID2;
+    return -1;
+}
+
+/* Fills a rock's shade tables once, from the palette entries its tumble
+ * frames use and their luminance in GAME.PAL.  The tables hold palette
+ * indices, so palette fades act on the rock as on its sprite.  Returns 0 if
+ * the colours cannot be found. */
+static int BuildRock3dShade(Ship3dModel *model, struct Shape *shape)
+{
+    static unsigned char pixels[ROCK3D_MAX_SPRITE_PIXELS];
+    static const float weight[3] = { 0.30f, 0.59f, 0.11f };
+    char resolved[1024];
+    unsigned char *palette;
+    unsigned long counts[256];
+    unsigned long total = 0;
+    unsigned char lut[ROCK3D_LUM_STEPS];
+    float luminance[256];
+    int used[256];
+    int usedCount = 0;
+    size_t size = 0;
+    short frames;
+    short frame;
+    int index;
+    int step;
+
+    if (model->shade != NULL)
+        return 1;
+    if (model->rockShadeTried || model->rockAlbedo == NULL || shape == NULL)
+        return 0;
+    model->rockShadeTried = 1;
+    palette = NULL;
+    if (SdlResolvePath("game.pal", resolved, sizeof(resolved)))
+        palette = ReadShip3dFile(resolved, &size);
+    if (palette == NULL || size < 0x30 + 0x300) {
+        fprintf(stderr, "ship3d: no GAME.PAL to colour the rocks\n");
+        SDL_free(palette);
+        return 0;
+    }
+
+    SDL_zero(counts);
+    frames = GetShapeFrameCount(shape);
+    for (frame = 0; frame < frames; frame++) {
+        short width = 0;
+        short height = 0;
+        short originX = 0;
+        short originY = 0;
+        int pixel;
+
+        GetShapeFrameExtents(shape, frame, &width, &height, &originX,
+                             &originY);
+        if (width <= 0 || height <= 0 ||
+            (int)width * height > ROCK3D_MAX_SPRITE_PIXELS)
+            continue;
+        SDL_memset(pixels, 0xff, (size_t)width * height);
+        DecodeShapeFrame(shape, frame, pixels, width, height, originX,
+                         originY);
+        for (pixel = 0; pixel < (int)width * height; pixel++) {
+            if (pixels[pixel] != 0 && pixels[pixel] != 0xff) {
+                counts[pixels[pixel]]++;
+                total++;
+            }
+        }
+    }
+    for (index = 0; index < 256; index++) {
+        const unsigned char *rgb = palette + 0x30 + index * 3;
+
+        luminance[index] = weight[0] * rgb[0] + weight[1] * rgb[1] +
+                           weight[2] * rgb[2];
+        if (counts[index] > 0 &&
+            counts[index] * ROCK3D_RARE_ENTRY >= total)
+            used[usedCount++] = index;
+    }
+    SDL_free(palette);
+    if (usedCount == 0) {
+        fprintf(stderr, "ship3d: the rock's sprite has no colours\n");
+        return 0;
+    }
+
+    /* The used entry nearest in luminance at each quarter step. */
+    for (step = 0; step < ROCK3D_LUM_STEPS; step++) {
+        float target = (float)step * 0.25f;
+        int best = used[0];
+        int entry;
+
+        for (entry = 1; entry < usedCount; entry++) {
+            if (SDL_fabsf(luminance[used[entry]] - target) <
+                SDL_fabsf(luminance[best] - target))
+                best = used[entry];
+        }
+        lut[step] = (unsigned char)best;
+    }
+    model->shade = SDL_malloc((size_t)model->count * model->steps);
+    if (model->shade == NULL)
+        return 0;
+    for (index = 0; index < model->count; index++) {
+        for (step = 0; step < model->steps; step++) {
+            float lum = model->rockAlbedo[index] *
+                        (model->rockAmbient + model->rockDiffuse *
+                                                  (float)step /
+                                                  (float)(model->steps - 1));
+            int at = (int)(lum * 4.0f + 0.5f);
+
+            if (at < 0)
+                at = 0;
+            else if (at >= ROCK3D_LUM_STEPS)
+                at = ROCK3D_LUM_STEPS - 1;
+            model->shade[(size_t)index * model->steps + step] = lut[at];
+        }
+    }
+    fprintf(stderr, "ship3d: rock coloured from %d palette entries\n",
+            usedCount);
+    return 1;
+}
+
+/* out = a * b for 3x3 matrices. */
+static void MultiplyRock3dMatrix(const float a[3][3], const float b[3][3],
+                                 float out[3][3])
+{
+    int row;
+    int column;
+
+    for (row = 0; row < 3; row++)
+        for (column = 0; column < 3; column++)
+            out[row][column] = a[row][0] * b[0][column] +
+                               a[row][1] * b[1][column] +
+                               a[row][2] * b[2][column];
+}
+
+/* The model-to-camera rotation for the rock obj: the tumble about the
+ * model's axis, then the slot's own attitude, then the object's frame. */
+static void ComputeRock3dBasis(short obj, const Ship3dModel *model,
+                               float basis[3][3])
+{
+    const ObjectTypeData *typeData = &aObjectTypeData[aeObjectTypeList[obj]];
+    const unsigned int *animation =
+        (const unsigned int *)typeData->animation;
+    Uint32 state = 0x9e3779b9U * (Uint32)(obj + 1);
+    float random[4];
+    float quaternion[4];
+    float attitude[3][3];
+    float spin[3][3];
+    float world[3][3];
+    float combined[3][3];
+    float angle;
+    float progress;
+    float cosine;
+    float sine;
+    float rootA;
+    float rootB;
+    const float *axis = model->rockAxis;
+    int period = typeData->yawRate > 0 ? typeData->yawRate : 1;
+    int elapsed = period - asObjectAnimationDelay[obj];
+    int part;
+
+    /* A generator of its own: the game's would change what the sim rolls. */
+    for (part = 0; part < 4; part++) {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        random[part] = (float)(state >> 8) / 16777216.0f;
+    }
+    /* A uniformly random attitude (Shoemake's method). */
+    rootA = SDL_sqrtf(1.0f - random[0]);
+    rootB = SDL_sqrtf(random[0]);
+    quaternion[0] = rootA * SDL_sinf(6.2831853f * random[1]);
+    quaternion[1] = rootA * SDL_cosf(6.2831853f * random[1]);
+    quaternion[2] = rootB * SDL_sinf(6.2831853f * random[2]);
+    quaternion[3] = rootB * SDL_cosf(6.2831853f * random[2]);
+    {
+        float x = quaternion[0];
+        float y = quaternion[1];
+        float z = quaternion[2];
+        float w = quaternion[3];
+
+        attitude[0][0] = 1.0f - 2.0f * (y * y + z * z);
+        attitude[0][1] = 2.0f * (x * y - z * w);
+        attitude[0][2] = 2.0f * (x * z + y * w);
+        attitude[1][0] = 2.0f * (x * y + z * w);
+        attitude[1][1] = 1.0f - 2.0f * (x * x + z * z);
+        attitude[1][2] = 2.0f * (y * z - x * w);
+        attitude[2][0] = 2.0f * (x * z - y * w);
+        attitude[2][1] = 2.0f * (y * z + x * w);
+        attitude[2][2] = 1.0f - 2.0f * (x * x + y * y);
+    }
+
+    /* animate_shape shows a new frame every `period` ticks; the reverse
+     * tables count down. */
+    if (elapsed < 0)
+        elapsed = 0;
+    else if (elapsed > period - 1)
+        elapsed = period - 1;
+    progress = ((float)elapsed + (float)SdlSmoothFraction()) / (float)period;
+    if (animation != NULL && animation[0] > animation[1])
+        progress = -progress;
+    angle = ((float)asObjectViewFrames[obj] + progress) * model->rockStep +
+            6.2831853f * random[3];
+
+    /* Rodrigues: rotation by angle about the unit axis. */
+    cosine = SDL_cosf(angle);
+    sine = SDL_sinf(angle);
+    spin[0][0] = cosine + axis[0] * axis[0] * (1.0f - cosine);
+    spin[0][1] = axis[0] * axis[1] * (1.0f - cosine) - axis[2] * sine;
+    spin[0][2] = axis[0] * axis[2] * (1.0f - cosine) + axis[1] * sine;
+    spin[1][0] = axis[1] * axis[0] * (1.0f - cosine) + axis[2] * sine;
+    spin[1][1] = cosine + axis[1] * axis[1] * (1.0f - cosine);
+    spin[1][2] = axis[1] * axis[2] * (1.0f - cosine) - axis[0] * sine;
+    spin[2][0] = axis[2] * axis[0] * (1.0f - cosine) - axis[1] * sine;
+    spin[2][1] = axis[2] * axis[1] * (1.0f - cosine) + axis[0] * sine;
+    spin[2][2] = cosine + axis[2] * axis[2] * (1.0f - cosine);
+
+    SdlShip3dComputeBasis(obj, world);
+    MultiplyRock3dMatrix(world, attitude, combined);
+    MultiplyRock3dMatrix(combined, spin, basis);
+}
+
 int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
 {
     Ship3dModel *model;
@@ -791,20 +1118,34 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
     float sunColour[3];
     float silhouette;
     float keyScale;
+    int rockType;
+    int modelType;
 
-    if (!g_bShip3dEnabled || viewport == NULL || viewport->pixels == NULL)
+    if (viewport == NULL || viewport->pixels == NULL)
         return 0;
-    if (aeObjectClass[obj] != OBJECT_CLASS_CAPITAL_SHIP &&
-        aeObjectClass[obj] != OBJECT_CLASS_SHIP)
-        return 0;
-    if (g_aeShip3dPoseSource[obj] == SHIP3D_POSE_SPRITE_ONLY ||
-        (g_aeShip3dPoseSource[obj] == SHIP3D_POSE_SPRITE_VIEW &&
-         !ComputeShip3dSpriteBasis(obj, basis)))
-        return 0;
-    model = (Ship3dModel *)GetShip3dModel(aeObjectTypeList[obj]);
-    if (model == NULL)
-        return 0;
-    occlusion = GetShip3dOcclusion(model, aeObjectTypeList[obj]);
+    rockType = GetRock3dModelType(obj);
+    if (rockType >= 0) {
+        modelType = rockType;
+        model = (Ship3dModel *)GetShip3dModel(modelType);
+        if (model == NULL ||
+            !BuildRock3dShade(model, apObjShapeArray[obj]))
+            return 0;
+    } else {
+        if (!g_bShip3dEnabled)
+            return 0;
+        if (aeObjectClass[obj] != OBJECT_CLASS_CAPITAL_SHIP &&
+            aeObjectClass[obj] != OBJECT_CLASS_SHIP)
+            return 0;
+        if (g_aeShip3dPoseSource[obj] == SHIP3D_POSE_SPRITE_ONLY ||
+            (g_aeShip3dPoseSource[obj] == SHIP3D_POSE_SPRITE_VIEW &&
+             !ComputeShip3dSpriteBasis(obj, basis)))
+            return 0;
+        modelType = aeObjectTypeList[obj];
+        model = (Ship3dModel *)GetShip3dModel(modelType);
+        if (model == NULL || model->shade == NULL)
+            return 0;
+    }
+    occlusion = GetShip3dOcclusion(model, modelType);
     scale = (float)(unsigned short)asObjScreenScalesArray[obj] / 256.0f;
     if (scale <= 0.0f)
         return 1;
@@ -826,7 +1167,10 @@ int SdlShip3dDraw(Viewport *viewport, short obj, float centerX, float centerY)
             return 1;
     }
 
-    SdlShip3dComputeBasis(obj, basis);
+    if (rockType >= 0)
+        ComputeRock3dBasis(obj, model, basis);
+    else
+        SdlShip3dComputeBasis(obj, basis);
     if (!SdlBackdropLightCamera(g_afShip3dRimLight)) {
         g_afShip3dRimLight[0] = 0.57735027f;
         g_afShip3dRimLight[1] = 0.57735027f;
@@ -1085,6 +1429,7 @@ void SdlShip3dShutdown(void)
         SDL_free(g_aShip3dModels[type].occlusion);
         SDL_free(g_aShip3dModels[type].albedo);
         SDL_free(g_aShip3dModels[type].unlit);
+        SDL_free(g_aShip3dModels[type].rockAlbedo);
         SDL_zero(g_aShip3dModels[type]);
     }
     SDL_free(g_pfShip3dDepth);
