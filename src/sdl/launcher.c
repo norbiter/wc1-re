@@ -75,6 +75,8 @@ static void SdlPrintUsage(FILE *stream)
           "                          of light with glare\n"
           "  --fine-backdrop         With --enhanced, redraw planets, suns and\n"
           "                          nebulae at display resolution\n"
+          "  --fine-shots            With --enhanced, redraw gun shots at\n"
+          "                          display resolution\n"
           "  --backdrop-light        With --ship3d, light ships' edges from the\n"
           "                          backdrop's sun or lit planet\n"
           "  --glare                 With --enhanced, a large sun dazzles: a haze\n"
@@ -202,6 +204,8 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlFineStarsEnable();
         } else if (strcmp(argument, "--fine-backdrop") == 0) {
             SdlFineBackdropEnable();
+        } else if (strcmp(argument, "--fine-shots") == 0) {
+            SdlFineShotsEnable();
         } else if (strcmp(argument, "--backdrop-light") == 0) {
             SdlBackdropLightEnable();
         } else if (strcmp(argument, "--glare") == 0) {

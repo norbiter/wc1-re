@@ -85,6 +85,7 @@ typedef void (APIENTRY *GlTexImage3DProc)(GLenum target, GLint level,
                                             const void *pixels);
 typedef void (APIENTRY *GlTexParameteriProc)(GLenum target, GLenum name,
                                                GLint value);
+typedef void (APIENTRY *GlGenerateMipmapProc)(GLenum target);
 typedef void (APIENTRY *GlTexSubImage3DProc)(
     GLenum target, GLint level, GLint xOffset, GLint yOffset, GLint zOffset,
     GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type,
@@ -143,6 +144,7 @@ typedef struct GlFunctions {
     GlTexImage2DProc TexImage2D;
     GlTexImage3DProc TexImage3D;
     GlTexParameteriProc TexParameteri;
+    GlGenerateMipmapProc GenerateMipmap;
     GlTexSubImage3DProc TexSubImage3D;
     GlUniform1iProc Uniform1i;
     GlUniform1fProc Uniform1f;
@@ -245,7 +247,7 @@ typedef enum GlFrameState {
 #define GL_RENDERER_SPRITE_ATLAS_PADDING 1
 #define GL_RENDERER_CACHED_FRAME_CAPACITY 2048
 #define GL_RENDERER_SHIP_POINT_LIMIT (1U << 21)
-#define GL_RENDERER_IMAGE_CAPACITY 32
+#define GL_RENDERER_IMAGE_CAPACITY 64
 
 /* An RGBA image (premultiplied) drawn by image overlays.  The pixels wait in
    pending until the next frame is drawn, where the context is current. */
@@ -712,6 +714,8 @@ static int LoadGlFunctions(void)
     LOAD_GL_FUNCTION(TexImage3D, GlTexImage3DProc, "glTexImage3D");
     LOAD_GL_FUNCTION(TexParameteri, GlTexParameteriProc,
                          "glTexParameteri");
+    LOAD_GL_FUNCTION(GenerateMipmap, GlGenerateMipmapProc,
+                         "glGenerateMipmap");
     LOAD_GL_FUNCTION(TexSubImage3D, GlTexSubImage3DProc,
                          "glTexSubImage3D");
     LOAD_GL_FUNCTION(Uniform1i, GlUniform1iProc, "glUniform1i");
@@ -1247,8 +1251,10 @@ static int UploadGlImage(GlImage *image)
         return 0;
     g_renderer.gl.ActiveTexture(GL_TEXTURE4);
     g_renderer.gl.BindTexture(GL_TEXTURE_2D, image->texture);
+    /* Mipmapped, so an image built for a large size can be drawn small (a
+     * receding shot) without aliasing. */
     g_renderer.gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
-                                GL_LINEAR);
+                                GL_LINEAR_MIPMAP_LINEAR);
     g_renderer.gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
                                 GL_LINEAR);
     g_renderer.gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
@@ -1259,6 +1265,7 @@ static int UploadGlImage(GlImage *image)
     g_renderer.gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, image->width,
                              image->height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                              image->pending);
+    g_renderer.gl.GenerateMipmap(GL_TEXTURE_2D);
     free(image->pending);
     image->pending = 0;
     return 1;

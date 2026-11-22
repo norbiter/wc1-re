@@ -591,6 +591,7 @@ MODERN_GAME_HOST_SRCS = \
 	src/sdl/dust.c \
 	src/sdl/stars.c \
 	src/sdl/backdrop.c \
+	src/sdl/fineshots.c \
 	src/sdl/backdroplight.c \
 	src/sdl/glare.c \
 	src/sdl/ttftext.c \

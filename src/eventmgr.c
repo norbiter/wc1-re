@@ -1047,6 +1047,15 @@ void draw_sorted_objects_to_buffer(void)
                                             asObjScreenScalesArray[obj],
                                             asObjectFlipArray[obj]))
                         break;
+                    /* --fine-shots redraws gun bolts at output resolution. */
+                    if (SdlFineShotDraw(&stSpaceBufferViewport, (short)obj,
+                                        enhancedScreenX, enhancedScreenY,
+                                        objectShape,
+                                        asObjectViewFrames[obj],
+                                        asObjScreenAngles[obj],
+                                        asObjScreenScalesArray[obj],
+                                        asObjectFlipArray[obj]))
+                        break;
                     if (!SdlRecordSpaceSprite(
                             &stSpaceBufferViewport, enhancedScreenX, enhancedScreenY,
                             objectShape,
