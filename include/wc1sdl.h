@@ -273,7 +273,9 @@ int SdlRecordSpaceSprite(
     const struct Viewport *viewport, float x, float y,
     struct Shape *shape, short frame, short angle, short scale,
     short flip);
+void SdlShip3dSetDirectory(const char *directory);
 void SdlShip3dEnable(const char *directory);
+int SdlShip3dHasModels(const char *directory, int rocks);
 int SdlShip3dEnabled(void);
 void SdlShip3dEnableTrueColour(void);
 void SdlRock3dEnable(void);

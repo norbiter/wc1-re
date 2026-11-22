@@ -152,7 +152,9 @@ static int g_nShip3dGlPointCapacity;
 /* Where each object's orientation comes from: SHIP3D_POSE_*. */
 static unsigned char g_aeShip3dPoseSource[SPACE_OBJECT_COUNT];
 
-void SdlShip3dEnable(const char *directory)
+/* Where the models are read from, for ships and rocks alike.  Resolved now,
+ * since the game later changes into GAMEDAT. */
+void SdlShip3dSetDirectory(const char *directory)
 {
     const char *path;
 
@@ -163,7 +165,44 @@ void SdlShip3dEnable(const char *directory)
 #else
     SDL_strlcpy(g_szShip3dDirectory, path, sizeof(g_szShip3dDirectory));
 #endif
+}
+
+void SdlShip3dEnable(const char *directory)
+{
+    SdlShip3dSetDirectory(directory);
     g_bShip3dEnabled = 1;
+}
+
+static int Ship3dFileExists(const char *directory, const char *name, int type)
+{
+    char path[1200];
+    SDL_RWops *file;
+
+    SDL_snprintf(path, sizeof(path), "%s/%s%02d.light", directory, name, type);
+    file = SDL_RWFromFile(path, "rb");
+    if (file == NULL) {
+        SDL_ClearError();
+        return 0;
+    }
+    SDL_RWclose(file);
+    return 1;
+}
+
+/* Nonzero when directory holds relit models: a ship's or, with rocks, an
+ * asteroid's .light sidecar.  Lets --enhanced turn the models on only where
+ * bin/ship3dLight.py has been run. */
+int SdlShip3dHasModels(const char *directory, int rocks)
+{
+    int type;
+
+    if (rocks)
+        return Ship3dFileExists(directory, "ROCK_", 16);
+    for (type = 0; type < SHIP3D_TYPE_COUNT; type++) {
+        if (Ship3dFileExists(directory, "SHIP_V", type) ||
+            Ship3dFileExists(directory, "SHIPTYPE_V", type))
+            return 1;
+    }
+    return 0;
 }
 
 /* --rock3d on its own reads the models from ./ship3d. */

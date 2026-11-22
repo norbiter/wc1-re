@@ -48,12 +48,237 @@ static int SdlSetMt32RomArgument(const char *directory, SdlLauncherOptions *opti
                      directory) < (int)sizeof(options->mt32Roms);
 }
 
+/* Features with an on/off switch.  Each takes --NAME and --no-NAME (for an
+ * inverted one, --no-NAME turns the feature on), the last one given wins,
+ * and a feature named on neither form takes its group's default once the
+ * launcher's choices are known. */
+enum SdlFeatureGroup {
+    SDL_FEATURE_GROUP_DEFAULT,  /* on unless --classic */
+    SDL_FEATURE_GROUP_ENHANCED, /* on with --enhanced unless --classic */
+    SDL_FEATURE_GROUP_MODELS,   /* as ENHANCED, where ship3d models are found */
+    SDL_FEATURE_GROUP_EASIER,   /* on with --easier */
+    SDL_FEATURE_GROUP_OTHER,    /* off unless asked for */
+    SDL_FEATURE_GROUP_DEBUG     /* off unless asked for; --help-debug */
+};
+
+enum SdlFeatureState {
+    SDL_FEATURE_UNSET,
+    SDL_FEATURE_ON,
+    SDL_FEATURE_OFF
+};
+
+typedef struct SdlFeatureOption {
+    const char *name;
+    const char *valueName; /* also takes --NAME=VALUE; NULL for none */
+    int group;
+    int inverted;
+    void (*apply)(const char *value);
+    const char *help;
+} SdlFeatureOption;
+
+static void SdlApplyShieldFlash(const char *value) { (void)value; SdlShieldFlashEnable(); }
+static void SdlApplyGunRange(const char *value) { (void)value; SdlGunRangeEnable(); }
+static void SdlApplySmooth(const char *value) { (void)value; SdlSmoothEnable(); }
+static void SdlApplyDust(const char *value) { (void)value; SdlDustEnable(); }
+static void SdlApplyAspectless(const char *value) { (void)value; SdlAspectlessEnable(); }
+static void SdlApplyFineStars(const char *value) { (void)value; SdlFineStarsEnable(); }
+static void SdlApplyFineBackdrop(const char *value) { (void)value; SdlFineBackdropEnable(); }
+static void SdlApplyFineShots(const char *value) { (void)value; SdlFineShotsEnable(); }
+static void SdlApplyGlare(const char *value) { (void)value; SdlGlareEnable(); }
+static void SdlApplyHdr(const char *value) { SdlHdrEnable(value ? atoi(value) : 0); }
+static void SdlApplyTtfText(const char *value) { (void)value; SdlTtfTextEnable(); }
+static void SdlApplyShip3d(const char *value) { SdlShip3dEnable(value); }
+static void SdlApplyRock3d(const char *value) { (void)value; SdlRock3dEnable(); }
+static void SdlApplyTrueColour(const char *value) { (void)value; SdlShip3dEnableTrueColour(); }
+static void SdlApplyBackdropLight(const char *value) { (void)value; SdlBackdropLightEnable(); }
+static void SdlApplyNoFriendlyFire(const char *value) { (void)value; SdlNoFriendlyFireEnable(); }
+static void SdlApplyLowMissile(const char *value) { (void)value; SdlLowMissileEnable(); }
+static void SdlApplySturdyFriends(const char *value) { (void)value; SdlSturdyFriendsEnable(); }
+static void SdlApplyFairAsteroids(const char *value) { (void)value; SdlFairAsteroidsEnable(); }
+static void SdlApplyAiThrottle(const char *value) { SdlAiThrottleEnable(value ? atoi(value) : 0); }
+static void SdlApplyMouseCurve(const char *value) { SdlMouseCurveEnable(value ? atoi(value) : 0); }
+static void SdlApplyJoystickCurve(const char *value) { SdlJoystickCurveEnable(value ? atoi(value) : 0); }
+static void SdlApplyHitSpheres(const char *value) { (void)value; SdlHitSphereEnable(); }
+static void SdlApplyMissionMenu(const char *value) { (void)value; SdlMissionMenuEnable(); }
+static void SdlApplyJoystickDebug(const char *value) { (void)value; SdlEnableJoystickDebug(); }
+
+static const SdlFeatureOption g_astSdlFeatures[] = {
+    {"gun-range", NULL, SDL_FEATURE_GROUP_DEFAULT, 0, SdlApplyGunRange,
+     "Crosshair dark until the target is in gun range"},
+    {"shield-flash", NULL, SDL_FEATURE_GROUP_DEFAULT, 0, SdlApplyShieldFlash,
+     "Flash a hemisphere over a ship when its shields take a hit"},
+    {"smooth", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplySmooth,
+     "Space flight at 60 fps (left off by --enhanced unless the display "
+     "runs at a multiple of 60 Hz)"},
+    {"dust", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyDust,
+     "Fine space dust that streaks with speed"},
+    {"aspectless", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyAspectless,
+     "Cockpit-less flight fills a fullscreen display of any shape"},
+    {"fine-stars", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyFineStars,
+     "Stars drawn as sharp points of light with glare"},
+    {"fine-backdrop", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyFineBackdrop,
+     "Planets, suns and nebulae redrawn at display resolution"},
+    {"fine-shots", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyFineShots,
+     "Gun shots redrawn at display resolution as bolts"},
+    {"glare", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyGlare,
+     "A large sun dazzles: a haze round it, and 3D ships before it in "
+     "silhouette"},
+    {"hdr", "PCT", SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyHdr,
+     "On a macOS HDR display, suns, glare and gun shots glow above white; "
+     "PCT scales the extra brightness (default 100)"},
+    {"ttf-text", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyTtfText,
+     "Text in the Space Wing Leader TrueType font at display resolution"},
+    {"ship3d", "PATH", SDL_FEATURE_GROUP_MODELS, 0, SdlApplyShip3d,
+     "Ships drawn from the 3D models in PATH (default: ship3d)"},
+    {"rock3d", NULL, SDL_FEATURE_GROUP_MODELS, 0, SdlApplyRock3d,
+     "Asteroids drawn as tumbling 3D models"},
+    {"ship3d-truecolour", NULL, SDL_FEATURE_GROUP_MODELS, 0, SdlApplyTrueColour,
+     "3D ships shaded in true colour"},
+    {"backdrop-light", NULL, SDL_FEATURE_GROUP_MODELS, 0, SdlApplyBackdropLight,
+     "3D models lit from the backdrop's sun or lit planet"},
+    {"friendly-fire", NULL, SDL_FEATURE_GROUP_EASIER, 1, SdlApplyNoFriendlyFire,
+     "--no-friendly-fire: shots and blasts spare ships on their own side; "
+     "--friendly-fire keeps the original"},
+    {"low-missile", NULL, SDL_FEATURE_GROUP_EASIER, 0, SdlApplyLowMissile,
+     "Kilrathi ships carry at most one missile of each type"},
+    {"sturdy-friends", NULL, SDL_FEATURE_GROUP_EASIER, 0, SdlApplySturdyFriends,
+     "Double shields on friendly transports and capital ships"},
+    {"fair-asteroids", NULL, SDL_FEATURE_GROUP_EASIER, 0, SdlApplyFairAsteroids,
+     "No asteroids spawned on an intercept course"},
+    {"ai-throttle", "N", SDL_FEATURE_GROUP_EASIER, 0, SdlApplyAiThrottle,
+     "Above N fighters in flight (default 6), each decides less often"},
+    {"mouse-curve", "PCT", SDL_FEATURE_GROUP_OTHER, 0, SdlApplyMouseCurve,
+     "Smooth linear-to-exponential mouse steering; PCT scales sensitivity "
+     "(default 100)"},
+    {"joystick-curve", "PCT", SDL_FEATURE_GROUP_OTHER, 0, SdlApplyJoystickCurve,
+     "The same curve for gamepad and joystick axes"},
+    {"hitspheres", NULL, SDL_FEATURE_GROUP_DEBUG, 0, SdlApplyHitSpheres,
+     "Show each ship's collision volume"},
+    {"mission-menu", NULL, SDL_FEATURE_GROUP_DEBUG, 0, SdlApplyMissionMenu,
+     "Hold Alt while loading a game to pick any mission"},
+    {"joystick-debug", NULL, SDL_FEATURE_GROUP_DEBUG, 0, SdlApplyJoystickDebug,
+     "Log joystick input"},
+};
+
+#define SDL_FEATURE_COUNT SDL_arraysize(g_astSdlFeatures)
+
+static unsigned char g_aeSdlFeatureState[SDL_FEATURE_COUNT];
+static const char *g_apszSdlFeatureValue[SDL_FEATURE_COUNT];
+static int g_bSdlClassic;
+static int g_bSdlEasier;
+
+static int SdlFindFeature(const char *name)
+{
+    size_t feature;
+
+    for (feature = 0; feature < SDL_FEATURE_COUNT; feature++) {
+        if (strcmp(g_astSdlFeatures[feature].name, name) == 0)
+            return (int)feature;
+    }
+    return -1;
+}
+
+/* Records --NAME, --NAME=VALUE or --no-NAME.  Returns 1 when the argument
+ * names a feature, 0 when it does not, and -1 when it is malformed. */
+static int SdlParseFeatureArgument(const char *argument)
+{
+    const SdlFeatureOption *option;
+    const char *name;
+    const char *equals;
+    size_t length;
+    size_t feature;
+    int negative;
+
+    name = argument + 2;
+    negative = strncmp(name, "no-", 3) == 0;
+    if (negative)
+        name += 3;
+    equals = strchr(name, '=');
+    length = equals != NULL ? (size_t)(equals - name) : strlen(name);
+    for (feature = 0; feature < SDL_FEATURE_COUNT; feature++) {
+        option = &g_astSdlFeatures[feature];
+        if (strlen(option->name) == length &&
+            strncmp(option->name, name, length) == 0)
+            break;
+    }
+    if (feature == SDL_FEATURE_COUNT)
+        return 0;
+    if (equals != NULL && (negative || option->valueName == NULL ||
+                           equals[1] == '\0')) {
+        fprintf(stderr, "Option %s takes no value here.\n", argument);
+        return -1;
+    }
+    g_aeSdlFeatureState[feature] =
+        negative != option->inverted ? SDL_FEATURE_OFF : SDL_FEATURE_ON;
+    if (equals != NULL)
+        g_apszSdlFeatureValue[feature] = equals + 1;
+    return 1;
+}
+
+/* Prints "  FLAG  TEXT" with TEXT wrapped into a column. */
+static void SdlPrintUsageEntry(FILE *stream, const char *flag, const char *text)
+{
+    enum { COLUMN = 28, WIDTH = 79 };
+    const char *word;
+    size_t wordLength;
+    int position;
+
+    position = fprintf(stream, "  %s", flag);
+    if (position >= COLUMN) {
+        fputc('\n', stream);
+        position = 0;
+    }
+    fprintf(stream, "%*s", COLUMN - position, "");
+    position = COLUMN;
+    while (*text != '\0') {
+        word = text;
+        wordLength = strcspn(word, " ");
+        if (position > COLUMN && position + 1 + (int)wordLength > WIDTH) {
+            fprintf(stream, "\n%*s", COLUMN, "");
+            position = COLUMN;
+        } else if (position > COLUMN) {
+            fputc(' ', stream);
+            position++;
+        }
+        fwrite(word, 1, wordLength, stream);
+        position += (int)wordLength;
+        text = word + wordLength;
+        while (*text == ' ')
+            text++;
+    }
+    fputc('\n', stream);
+}
+
+static void SdlPrintFeatureGroup(FILE *stream, int group, const char *heading)
+{
+    const SdlFeatureOption *option;
+    char flag[64];
+    size_t feature;
+    int onByDefault;
+
+    fprintf(stream, "\n%s\n", heading);
+    onByDefault = group != SDL_FEATURE_GROUP_OTHER &&
+                  group != SDL_FEATURE_GROUP_DEBUG;
+    for (feature = 0; feature < SDL_FEATURE_COUNT; feature++) {
+        option = &g_astSdlFeatures[feature];
+        if (option->group != group)
+            continue;
+        SDL_snprintf(flag, sizeof(flag), "--%s%s%s%s%s",
+                     onByDefault ? "[no-]" : option->inverted ? "no-" : "",
+                     option->name, option->valueName ? "[=" : "",
+                     option->valueName ? option->valueName : "",
+                     option->valueName ? "]" : "");
+        SdlPrintUsageEntry(stream, flag, option->help);
+    }
+}
+
 static void SdlPrintUsage(FILE *stream)
 {
     fputs("Usage: wc1 [options] [legacy game arguments]\n"
           "\n"
           "Options:\n"
           "  --help                  Show this list and exit\n"
+          "  --help-debug            List the debugging options and exit\n"
           "  --gui                   Show the graphical launcher\n"
           "  --swc-demo DIR          Run the Super Wing Commander demo in DIR\n"
           "  --campaign=NAME         wc1, sm1 or sm2\n"
@@ -63,56 +288,191 @@ static void SdlPrintUsage(FILE *stream)
           "  --voices=PATH           External voice catalog\n"
           "  --fullscreen, --windowed  Start fullscreen or in a window\n"
           "  --autosave, --no-autosave  Turn autosave checkpoints on or off\n"
-          "  --enhanced              Experimental GL sharp-bilinear rendering\n"
-          "  --ship3d[=PATH]         Render ships as 3D models\n"
-          "  --ship3d-truecolour     With --enhanced, shade 3D ships in true colour\n"
-          "  --rock3d                Render asteroids as tumbling 3D models\n"
-          "  --hitspheres            Show ship hit spheres\n"
-          "  --shield-flash          Flash a hemisphere over a ship when its shields take a hit\n"
-          "  --smooth                Smooth frame interpolation\n"
-          "  --dust                  Fine space dust that streaks with speed\n"
-          "  --fine-stars            With --enhanced, draw stars as sharp points\n"
-          "                          of light with glare\n"
-          "  --fine-backdrop         With --enhanced, redraw planets, suns and\n"
-          "                          nebulae at display resolution\n"
-          "  --fine-shots            With --enhanced, redraw gun shots at\n"
-          "                          display resolution\n"
-          "  --backdrop-light        With --ship3d, light ships' edges from the\n"
-          "                          backdrop's sun or lit planet\n"
-          "  --glare                 With --enhanced, a large sun dazzles: a haze\n"
-          "                          round it, and 3D ships before it in silhouette\n"
-          "  --hdr[=PCT]             With --enhanced on a macOS HDR display, suns\n"
-          "                          (--fine-backdrop), glare (--glare) and gun\n"
-          "                          shots (--fine-shots) glow above white; PCT\n"
-          "                          scales the extra brightness (default 100)\n"
-          "  --ttf-text              With --enhanced, draw text in the Space Wing\n"
-          "                          Leader TrueType font at display resolution\n"
-          "  --ai-throttle[=N]       Tune AI update throttling\n"
-          "  --ff                    Suppress friendly fire\n"
-          "  --gun-range             Tint the crosshair by effective gun range\n"
-          "  --mouse-curve[=PCT]     Smooth linear-to-exponential mouse steering;\n"
-          "                          PCT scales sensitivity (default 100)\n"
-          "  --joystick-curve[=PCT]  Same curve for gamepad/joystick axes\n"
-          "  --sturdy-friends        Double shields on friendly transports and capitals\n"
-          "  --low-missile           Cap Kilrathi ships at one missile per type\n"
-          "  --fair-asteroids        No asteroids spawned on an intercept course\n"
-          "  --aspectless            Cockpit-less flight fills a fullscreen display\n"
-          "                          of any aspect ratio\n"
+          "  --enhanced              Draw at display resolution with OpenGL, and\n"
+          "                          turn on the presentation features below\n"
+          "  --easier                Turn on the difficulty features below\n"
+          "  --classic               Leave every feature off unless named\n"
           "  --fov=DEGREES           Horizontal field of view of cockpit-less\n"
           "                          flight, 60-140 (default 90)\n"
-          "  --mission-menu          Enable the mission menu\n"
-          "  --cheats                Enable cheat mode\n"
-          "  --joystick-debug        Log joystick input\n"
+          "  --ega                   EGA dithering\n"
+          "  --music=DEVICE          default, adlib or mt32\n"
+          "  --mt32-roms=PATH        MT-32 ROM folder\n"
+          "  --mt32-model=MODEL      MT-32 model to emulate\n"
+          "  --mt32-check            Describe the MT-32 ROMs found and exit\n"
           "  --joystick-rumble       Enable joystick rumble\n"
           "  --joystick-mode=MODE    original, 4button-2axis, 4button-4axis\n"
           "  --joystick-axes=MODE    twin-stick-roll, twin-stick-yaw, hotas-yaw,\n"
           "                          hotas-roll, linear-throttle, rudder-yaw,\n"
           "                          rudder-roll\n"
-          "  --ega                   EGA dithering\n"
-          "\n"
+          "  --joystick-dead-zone=PCT  Dead zone for the extra joystick axes\n",
+          stream);
+    SdlPrintFeatureGroup(stream, SDL_FEATURE_GROUP_DEFAULT,
+                         "On unless --classic:");
+    SdlPrintFeatureGroup(stream, SDL_FEATURE_GROUP_ENHANCED,
+                         "On with --enhanced:");
+    SdlPrintFeatureGroup(stream, SDL_FEATURE_GROUP_MODELS,
+                         "On with --enhanced when the ship3d models are found\n"
+                         "(in ./ship3d, or ship3d beside or above the program):");
+    SdlPrintFeatureGroup(stream, SDL_FEATURE_GROUP_EASIER,
+                         "On with --easier:");
+    SdlPrintFeatureGroup(stream, SDL_FEATURE_GROUP_OTHER, "Off unless named:");
+    fputs("\n"
           "Other arguments (without a leading \"--\") are passed to the game as\n"
           "the original command-line tokens (b c f k q, Origin sN mN l, ...).\n",
           stream);
+}
+
+static void SdlPrintDebugUsage(FILE *stream)
+{
+    fputs("Debugging options:\n"
+          "  --cheats                Enable cheat mode\n",
+          stream);
+    SdlPrintFeatureGroup(stream, SDL_FEATURE_GROUP_DEBUG, "Off unless named:");
+}
+
+/* The ship3d folder: the one --ship3d=PATH names, else the first holding
+ * relit models of ./ship3d and ship3d beside or one level above the program,
+ * which covers both an installed copy and a build in out-modern. */
+static int SdlFindShip3dDirectory(const char *named, char *directory,
+                                  size_t capacity, int rocks)
+{
+    static const char *const relative[] = {"ship3d", "../ship3d", "../../ship3d"};
+    char *base;
+    size_t candidate;
+
+    if (named != NULL) {
+        SDL_strlcpy(directory, named, capacity);
+        return SdlShip3dHasModels(directory, rocks);
+    }
+    if (SdlShip3dHasModels("ship3d", rocks)) {
+        SDL_strlcpy(directory, "ship3d", capacity);
+        return 1;
+    }
+    base = SDL_GetBasePath();
+    if (base == NULL) {
+        SDL_ClearError();
+        return 0;
+    }
+    for (candidate = 0; candidate < SDL_arraysize(relative); candidate++) {
+        SDL_snprintf(directory, capacity, "%s%s", base, relative[candidate]);
+        if (SdlShip3dHasModels(directory, rocks)) {
+            SDL_free(base);
+            return 1;
+        }
+    }
+    SDL_free(base);
+    return 0;
+}
+
+/* Gives each feature not named on the command line its group's default and
+ * turns on the features that end up on.  --smooth waits for the window. */
+static void SdlResolveFeatures(int enhanced)
+{
+    static char directory[1024];
+    const SdlFeatureOption *option;
+    size_t feature;
+    int ship3d;
+    int rock3d;
+    int shipModels;
+    int rockModels;
+    int implied;
+
+    /* Implied models need the folder found; named ones search for it too,
+     * but keep ./ship3d as the place to report missing files from. */
+    ship3d = SdlFindFeature("ship3d");
+    rock3d = SdlFindFeature("rock3d");
+    shipModels = 0;
+    rockModels = 0;
+    if (g_aeSdlFeatureState[ship3d] != SDL_FEATURE_OFF ||
+        g_aeSdlFeatureState[rock3d] != SDL_FEATURE_OFF) {
+        shipModels = SdlFindShip3dDirectory(g_apszSdlFeatureValue[ship3d],
+                                            directory, sizeof(directory), 0);
+        rockModels = SdlFindShip3dDirectory(g_apszSdlFeatureValue[ship3d],
+                                            directory, sizeof(directory), 1);
+        if (shipModels || rockModels) {
+            SdlFindShip3dDirectory(g_apszSdlFeatureValue[ship3d], directory,
+                                   sizeof(directory), !shipModels);
+            g_apszSdlFeatureValue[ship3d] = directory;
+            SdlShip3dSetDirectory(directory);
+        }
+    }
+    if (!enhanced || g_bSdlClassic) {
+        shipModels = 0;
+        rockModels = 0;
+    }
+    for (feature = 0; feature < SDL_FEATURE_COUNT; feature++) {
+        option = &g_astSdlFeatures[feature];
+        if (g_aeSdlFeatureState[feature] != SDL_FEATURE_UNSET)
+            continue;
+        switch (option->group) {
+        case SDL_FEATURE_GROUP_DEFAULT:
+            implied = !g_bSdlClassic;
+            break;
+        case SDL_FEATURE_GROUP_ENHANCED:
+            implied = enhanced && !g_bSdlClassic;
+#ifndef __APPLE__
+            if (option->apply == SdlApplyHdr)
+                implied = 0;
+#endif
+            break;
+        case SDL_FEATURE_GROUP_MODELS:
+            if (option->apply == SdlApplyRock3d)
+                implied = rockModels;
+            else if (option->apply == SdlApplyBackdropLight)
+                implied = shipModels || rockModels;
+            else
+                implied = shipModels;
+            break;
+        case SDL_FEATURE_GROUP_EASIER:
+            implied = g_bSdlEasier;
+            break;
+        default:
+            implied = 0;
+            break;
+        }
+        g_aeSdlFeatureState[feature] = implied ? SDL_FEATURE_ON : SDL_FEATURE_OFF;
+        /* Only --smooth asks the display, which is not open yet. */
+        if (implied && option->apply == SdlApplySmooth)
+            g_aeSdlFeatureState[feature] = SDL_FEATURE_UNSET;
+    }
+    for (feature = 0; feature < SDL_FEATURE_COUNT; feature++) {
+        option = &g_astSdlFeatures[feature];
+        if (g_aeSdlFeatureState[feature] == SDL_FEATURE_ON &&
+            option->apply != SdlApplySmooth)
+            option->apply(g_apszSdlFeatureValue[feature]);
+    }
+}
+
+/* --smooth paces its presents by the clock and shows each on a vertical
+ * blank, so it judders unless the display refreshes at a multiple of 60 Hz.
+ * Named on the command line it is kept; implied, it waits for such a
+ * display.  An unknown rate is given the benefit of the doubt. */
+static void SdlResolveSmooth(SDL_Window *window)
+{
+    SDL_DisplayMode mode;
+    int feature;
+    int display;
+    int remainder;
+
+    feature = SdlFindFeature("smooth");
+    if (g_aeSdlFeatureState[feature] == SDL_FEATURE_UNSET) {
+        display = SDL_GetWindowDisplayIndex(window);
+        if (display >= 0 && SDL_GetCurrentDisplayMode(display, &mode) == 0 &&
+            mode.refresh_rate > 0) {
+            remainder = mode.refresh_rate % 60;
+            if (remainder > 1 && remainder < 59) {
+                fprintf(stderr, "Smooth flight is off: the display runs at "
+                        "%d Hz (--smooth turns it on anyway).\n",
+                        mode.refresh_rate);
+                g_aeSdlFeatureState[feature] = SDL_FEATURE_OFF;
+                return;
+            }
+        }
+        SDL_ClearError();
+        g_aeSdlFeatureState[feature] = SDL_FEATURE_ON;
+    }
+    if (g_aeSdlFeatureState[feature] == SDL_FEATURE_ON)
+        SdlApplySmooth(NULL);
 }
 
 static int SdlParsePortArguments(int *argumentCount, char **arguments,
@@ -122,6 +482,7 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
     char *argument;
     int argumentIndex;
     int outputArgumentIndex;
+    int featureResult;
 
     outputArgumentIndex = 1;
     memset(options, 0, sizeof(*options));
@@ -188,71 +549,18 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
         } else if (strcmp(argument, "--enhanced") == 0) {
             options->enhancedRenderer = 1;
             options->explicitOptions |= SDL_LAUNCHER_EXPLICIT_ENHANCED;
-        } else if (strcmp(argument, "--ship3d") == 0) {
-            SdlShip3dEnable(NULL);
-        } else if (strncmp(argument, "--ship3d=", 9) == 0) {
-            SdlShip3dEnable(argument + 9);
-        } else if (strcmp(argument, "--rock3d") == 0) {
-            SdlRock3dEnable();
-        } else if (strcmp(argument, "--ship3d-truecolour") == 0) {
-            SdlShip3dEnableTrueColour();
-        } else if (strcmp(argument, "--hitspheres") == 0) {
-            SdlHitSphereEnable();
-        } else if (strcmp(argument, "--shield-flash") == 0) {
-            SdlShieldFlashEnable();
-        } else if (strcmp(argument, "--smooth") == 0) {
-            SdlSmoothEnable();
-        } else if (strcmp(argument, "--dust") == 0) {
-            SdlDustEnable();
-        } else if (strcmp(argument, "--fine-stars") == 0) {
-            SdlFineStarsEnable();
-        } else if (strcmp(argument, "--fine-backdrop") == 0) {
-            SdlFineBackdropEnable();
-        } else if (strcmp(argument, "--fine-shots") == 0) {
-            SdlFineShotsEnable();
-        } else if (strcmp(argument, "--backdrop-light") == 0) {
-            SdlBackdropLightEnable();
-        } else if (strcmp(argument, "--glare") == 0) {
-            SdlGlareEnable();
-        } else if (strcmp(argument, "--hdr") == 0) {
-            SdlHdrEnable(0);
-        } else if (strncmp(argument, "--hdr=", 6) == 0) {
-            SdlHdrEnable(atoi(argument + 6));
-        } else if (strcmp(argument, "--ttf-text") == 0) {
-            SdlTtfTextEnable();
-        } else if (strcmp(argument, "--ai-throttle") == 0) {
-            SdlAiThrottleEnable(0);
-        } else if (strncmp(argument, "--ai-throttle=", 14) == 0) {
-            SdlAiThrottleEnable(atoi(argument + 14));
-        } else if (strcmp(argument, "--ff") == 0) {
-            SdlNoFriendlyFireEnable();
-        } else if (strcmp(argument, "--gun-range") == 0) {
-            SdlGunRangeEnable();
-        } else if (strcmp(argument, "--mouse-curve") == 0) {
-            SdlMouseCurveEnable(0);
-        } else if (strncmp(argument, "--mouse-curve=", 14) == 0) {
-            SdlMouseCurveEnable(atoi(argument + 14));
-        } else if (strcmp(argument, "--joystick-curve") == 0) {
-            SdlJoystickCurveEnable(0);
-        } else if (strncmp(argument, "--joystick-curve=", 17) == 0) {
-            SdlJoystickCurveEnable(atoi(argument + 17));
-        } else if (strcmp(argument, "--sturdy-friends") == 0) {
-            SdlSturdyFriendsEnable();
-        } else if (strcmp(argument, "--low-missile") == 0) {
-            SdlLowMissileEnable();
-        } else if (strcmp(argument, "--fair-asteroids") == 0) {
-            SdlFairAsteroidsEnable();
-        } else if (strcmp(argument, "--aspectless") == 0) {
-            SdlAspectlessEnable();
+        } else if (strcmp(argument, "--help-debug") == 0) {
+            SdlPrintDebugUsage(stdout);
+            exit(0);
+        } else if (strcmp(argument, "--easier") == 0) {
+            g_bSdlEasier = 1;
+        } else if (strcmp(argument, "--classic") == 0) {
+            g_bSdlClassic = 1;
         } else if (strncmp(argument, "--fov=", 6) == 0) {
             SdlFovSet(atoi(argument + 6));
-        } else if (strcmp(argument, "--mission-menu") == 0) {
-            SdlMissionMenuEnable();
         } else if (strcmp(argument, "--cheats") == 0) {
             options->cheatMode = 1;
             options->explicitOptions |= SDL_LAUNCHER_EXPLICIT_CHEATS;
-        } else if (strcmp(argument, "--joystick-debug") == 0) {
-            SdlEnableJoystickDebug();
         } else if (strcmp(argument, "--joystick-rumble") == 0) {
             options->joystickRumble = 1;
             options->explicitOptions |= SDL_LAUNCHER_EXPLICIT_RUMBLE;
@@ -327,6 +635,10 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
         } else if (strcmp(argument, "--ega") == 0) {
             options->egaDither = 1;
             options->explicitOptions |= SDL_LAUNCHER_EXPLICIT_EGA;
+        } else if (argument[0] == '-' && argument[1] == '-' &&
+                   (featureResult = SdlParseFeatureArgument(argument)) != 0) {
+            if (featureResult < 0)
+                return 0;
         } else if (argument[0] == '-' && argument[1] == '-') {
             fprintf(stderr, "Unknown option: %s\n\n", argument);
             SdlPrintUsage(stderr);
@@ -547,6 +859,7 @@ int main(int argumentCount, char **arguments)
     if (!SdlApplyLauncherOptions(&launcherOptions))
         return 1;
     useEnhancedRenderer = launcherOptions.enhancedRenderer;
+    SdlResolveFeatures(useEnhancedRenderer);
     if (useEnhancedRenderer)
         SdlSetVideoBackend(SDL_PORT_VIDEO_BACKEND_GL_SHARP_BILINEAR);
     if (launcherOptions.swcDemo) {
@@ -600,6 +913,7 @@ int main(int argumentCount, char **arguments)
     if (SdlUsingTownsJapanese())
 #endif
     SDL_StopTextInput();
+    SdlResolveSmooth(window);
     SdlCaptureInitialize();
     if (useLauncherGui && !SdlCaptureHiddenWindow()) {
         /* Hand focus from Slint's native event loop to the SDL game window. */
@@ -609,8 +923,7 @@ int main(int argumentCount, char **arguments)
     }
     if (useEnhancedRenderer)
         fprintf(stderr,
-                "Experimental enhanced rendering enabled "
-                "(GL sharp bilinear).\n");
+                "Enhanced rendering enabled (GL sharp bilinear).\n");
 
     DIBinstall(window);
     hMainWindow = window;
