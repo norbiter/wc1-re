@@ -11,6 +11,11 @@
  *   before and after the draw.  A glyph redrawn over itself, or erased by
  *   redrawing it in the background colour, takes the earlier record's
  *   "before" pixels, so what it covers is still the original background.
+ *   A glyph drawn in exactly the cell of an earlier one takes that record's
+ *   slot, since the newer glyph would win there anyway; other new glyphs
+ *   take a free slot, and only a full table gives up its oldest record.
+ *   Text the game draws once, such as the cockpit's VDU labels, so keeps
+ *   its record while readouts redraw themselves every tick.
  *
  *   Verification.  When a frame is presented, a glyph counts only while every
  *   pixel it wrote is still on screen.  Anything that drew over it, cleared
@@ -109,6 +114,7 @@ static int g_nTtfTextSampleAdvance;
 static float g_fTtfTextCapUnits;
 
 static TtfTextRecord g_astTtfTextRecords[TTF_TEXT_RECORD_CAPACITY];
+/* Where the search for a free record starts. */
 static int g_nTtfTextNextRecord;
 static unsigned int g_uTtfTextSerial;
 /* One more than the record most recently drawn at each screen position. */
@@ -121,6 +127,8 @@ static int g_bTtfTextPending;
 static unsigned char g_abTtfTextClaimed[SDL_PORT_FRAME_WIDTH *
                                        SDL_PORT_FRAME_HEIGHT];
 static unsigned short g_awTtfTextAccepted[TTF_TEXT_RECORD_CAPACITY];
+/* The records in use, newest first, for the present being prepared. */
+static unsigned short g_awTtfTextNewest[TTF_TEXT_RECORD_CAPACITY];
 static SdlTtfTextQuad g_astTtfTextQuads[TTF_TEXT_RECORD_CAPACITY];
 static int g_nTtfTextQuadCount;
 
@@ -321,16 +329,27 @@ void SdlTtfTextBeginGlyph(const TextContext *context, unsigned char character,
     g_bTtfTextPending = 1;
 }
 
-static int TtfTextCellsMatch(const TtfTextRecord *a, const TtfTextRecord *b)
+/* A free record, or with none free the oldest one. */
+static int TakeTtfTextSlot(void)
 {
-    int row;
+    int step;
+    int index;
+    int oldest;
 
-    for (row = 0; row < a->height; row++) {
-        if (memcmp(a->after + row * TTF_TEXT_CELL_LIMIT,
-                   b->after + row * TTF_TEXT_CELL_LIMIT, (size_t)a->width) != 0)
-            return 0;
+    oldest = g_nTtfTextNextRecord;
+    for (step = 0; step < TTF_TEXT_RECORD_CAPACITY; step++) {
+        index = (g_nTtfTextNextRecord + step) % TTF_TEXT_RECORD_CAPACITY;
+        if (!g_astTtfTextRecords[index].used) {
+            oldest = index;
+            break;
+        }
+        /* Serials only grow, so the smallest difference is the oldest. */
+        if (g_uTtfTextSerial - g_astTtfTextRecords[index].serial >
+            g_uTtfTextSerial - g_astTtfTextRecords[oldest].serial)
+            oldest = index;
     }
-    return 1;
+    g_nTtfTextNextRecord = (oldest + 1) % TTF_TEXT_RECORD_CAPACITY;
+    return oldest;
 }
 
 /* Called once DrawFontGlyph has drawn the glyph. */
@@ -352,31 +371,31 @@ void SdlTtfTextEndGlyph(const TextContext *context)
                    context->viewport->rowOffsets[record->y + row] +
                    record->x,
                (size_t)record->width);
-    index = g_nTtfTextNextRecord;
+    /* A glyph drawn in exactly the cell of an earlier one replaces its
+     * record: the newer glyph wins that cell, and its "before" pixels
+     * already reach under the earlier one. */
+    index = -1;
+    latest = g_awTtfTextLatestAt[record->y * SDL_PORT_FRAME_WIDTH + record->x];
+    if (latest != 0) {
+        earlier = &g_astTtfTextRecords[latest - 1];
+        if (earlier->used && earlier->x == record->x &&
+            earlier->y == record->y && earlier->width == record->width &&
+            earlier->height == record->height)
+            index = latest - 1;
+    }
+    if (index < 0)
+        index = TakeTtfTextSlot();
     slot = &g_astTtfTextRecords[index];
     /* Taking the slot drops whatever it held. */
     if (slot->used &&
         g_awTtfTextLatestAt[slot->y * SDL_PORT_FRAME_WIDTH + slot->x] ==
             index + 1)
         g_awTtfTextLatestAt[slot->y * SDL_PORT_FRAME_WIDTH + slot->x] = 0;
-    /* The same glyph drawn again in the same place replaces its record. */
-    latest = g_awTtfTextLatestAt[record->y * SDL_PORT_FRAME_WIDTH + record->x];
-    if (latest != 0) {
-        earlier = &g_astTtfTextRecords[latest - 1];
-        if (earlier->used && earlier->x == record->x &&
-            earlier->y == record->y && earlier->width == record->width &&
-            earlier->height == record->height &&
-            earlier->character == record->character &&
-            earlier->colour == record->colour &&
-            TtfTextCellsMatch(earlier, record))
-            earlier->used = 0;
-    }
     *slot = *record;
     slot->used = 1;
     slot->serial = ++g_uTtfTextSerial;
     g_awTtfTextLatestAt[record->y * SDL_PORT_FRAME_WIDTH + record->x] =
         (unsigned short)(index + 1);
-    g_nTtfTextNextRecord = (index + 1) % TTF_TEXT_RECORD_CAPACITY;
 }
 
 /* Whether every pixel the glyph wrote (its ink, and its background where it
@@ -523,6 +542,18 @@ static const TtfTextFace *FindTtfTextFace(float scaleX, float scaleY)
     return face;
 }
 
+static int CompareTtfTextNewest(const void *left, const void *right)
+{
+    const TtfTextRecord *a =
+        &g_astTtfTextRecords[*(const unsigned short *)left];
+    const TtfTextRecord *b =
+        &g_astTtfTextRecords[*(const unsigned short *)right];
+    unsigned int ageA = g_uTtfTextSerial - a->serial;
+    unsigned int ageB = g_uTtfTextSerial - b->serial;
+
+    return ageA < ageB ? -1 : ageA > ageB;
+}
+
 static int CompareTtfTextAccepted(const void *left, const void *right)
 {
     const TtfTextRecord *a =
@@ -631,6 +662,7 @@ int SdlTtfTextPrepare(const unsigned char *screen,
                       float scaleX, float scaleY)
 {
     int acceptedCount;
+    int usedCount;
     int step;
     int index;
     int first;
@@ -639,16 +671,20 @@ int SdlTtfTextPrepare(const unsigned char *screen,
     if (!SdlTtfTextEnabled() || scaleX <= 0.0f || scaleY <= 0.0f)
         return 0;
     memset(g_abTtfTextClaimed, 0, sizeof(g_abTtfTextClaimed));
-    acceptedCount = 0;
     /* Newest first, so a glyph drawn over an older one wins. */
-    for (step = 1; step <= TTF_TEXT_RECORD_CAPACITY; step++) {
+    usedCount = 0;
+    for (index = 0; index < TTF_TEXT_RECORD_CAPACITY; index++) {
+        if (g_astTtfTextRecords[index].used)
+            g_awTtfTextNewest[usedCount++] = (unsigned short)index;
+    }
+    qsort(g_awTtfTextNewest, (size_t)usedCount, sizeof(g_awTtfTextNewest[0]),
+          CompareTtfTextNewest);
+    acceptedCount = 0;
+    for (step = 0; step < usedCount; step++) {
         TtfTextRecord *record;
 
-        index = (g_nTtfTextNextRecord - step + TTF_TEXT_RECORD_CAPACITY) %
-                TTF_TEXT_RECORD_CAPACITY;
+        index = g_awTtfTextNewest[step];
         record = &g_astTtfTextRecords[index];
-        if (!record->used)
-            continue;
         if (!TtfTextRecordHolds(record, mouseFree)) {
             if (++record->missed > TTF_TEXT_MISS_LIMIT)
                 record->used = 0;
