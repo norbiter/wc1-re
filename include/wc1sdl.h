@@ -299,6 +299,7 @@ void SdlFineStarsEnable(void);
 int SdlFineStarDraw(const struct Viewport *viewport, short obj, float x,
                     float y, struct Shape *shape, short frame);
 void SdlFineBackdropEnable(void);
+int SdlFineBackdropEnabled(void);
 void SdlFineBackdropNoteShape(short obj, short shapeId);
 int SdlFineBackdropDraw(const struct Viewport *viewport, short obj, float x,
                         float y, struct Shape *shape, short frame,
@@ -315,6 +316,7 @@ int SdlBackdropLightCamera(float light[3]);
 void SdlBackdropLightTrack(void);
 int SdlBackdropGlareSun(float camera[3], short *shapeId, int *size);
 void SdlGlareEnable(void);
+void SdlHdrEnable(int percent);
 void SdlGlareBeginFrame(void);
 float SdlGlareSilhouette(float x, float y, float radius, float direction[3],
                          float colour[3]);

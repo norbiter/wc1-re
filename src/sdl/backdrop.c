@@ -155,6 +155,11 @@ void SdlFineBackdropEnable(void)
     g_bFineBackdropEnabled = 1;
 }
 
+int SdlFineBackdropEnabled(void)
+{
+    return g_bFineBackdropEnabled;
+}
+
 /* InitializeConstellationObject reports which shape id each backdrop object
  * took, since the loaded packet does not say. */
 void SdlFineBackdropNoteShape(short obj, short shapeId)
@@ -1318,6 +1323,25 @@ static BackdropImage *GetImage(short shapeId, int scale, struct Shape *shape,
     return oldest;
 }
 
+/* The suns and stars among the backdrop shapes. */
+static int IsBackdropSun(short shapeId)
+{
+    switch (shapeId) {
+    case 4:  /* white star */
+    case 6:  /* red sun */
+    case 9:  /* yellow sun */
+    case 10: /* red giant */
+    case 14: /* large yellow sun */
+    case 15: /* small yellow sun */
+    case 18: /* speckled red sun */
+    case 21: /* blue-white star */
+    case 22: /* small blue-white star */
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 int SdlFineBackdropDraw(const Viewport *viewport, short obj, float x,
                         float y, struct Shape *shape, short frame,
                         short angle, short scale, short flip)
@@ -1397,5 +1421,10 @@ int SdlFineBackdropDraw(const Viewport *viewport, short obj, float x,
         corners[corner * 2] = x + sourceX * cosine - sourceY * sine;
         corners[corner * 2 + 1] = y + sourceX * sine + sourceY * cosine;
     }
-    return SdlGlRendererRecordImage(viewport, image->handle, corners, tint);
+    if (!SdlGlRendererRecordImage(viewport, image->handle, corners, tint))
+        return 0;
+    /* --hdr: a sun's or star's hot core glows above white. */
+    if (IsBackdropSun(shapeId))
+        SdlGlRendererSetLastHdrGain(SdlHdrGain());
+    return 1;
 }

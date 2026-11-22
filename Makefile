@@ -129,7 +129,7 @@ UNAME_M := $(shell uname -m)
 MODERN_EXE_SUFFIX :=
 MODERN_PLATFORM_LIBS :=
 ifeq ($(UNAME_S),Darwin)
-MODERN_PLATFORM_LIBS += -framework CoreText -framework CoreGraphics -framework CoreFoundation
+MODERN_PLATFORM_LIBS += -framework CoreText -framework CoreGraphics -framework CoreFoundation -lobjc
 endif
 ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)))
 MODERN_EXE_SUFFIX := .exe
@@ -594,6 +594,7 @@ MODERN_GAME_HOST_SRCS = \
 	src/sdl/fineshots.c \
 	src/sdl/backdroplight.c \
 	src/sdl/glare.c \
+	src/sdl/hdr.c \
 	src/sdl/ttftext.c \
 	src/sdl/aspectless.c \
 	src/sdl/fov.c \

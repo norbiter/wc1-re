@@ -45,6 +45,12 @@ void SdlGlRendererReleaseImage(int handle);
 unsigned int SdlGlRendererImageGeneration(void);
 int SdlGlRendererRecordImage(const struct Viewport *viewport, int handle,
                              const float corners[8], const float tint[3]);
+void SdlGlRendererSetLastHdrGain(float gain);
+int SdlHdrRequested(void);
+void SdlHdrPrepareWindow(SDL_Window *window);
+void SdlHdrSetSurface(int floatSurface);
+void SdlHdrBeginFrame(void);
+float SdlHdrGain(void);
 int SdlConfigureVideoWindow(Uint32 *windowFlags);
 void SdlCalculateOutputViewport(int width, int height, int *left,
                                    int *bottom, int *viewportWidth,

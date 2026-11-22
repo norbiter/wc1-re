@@ -626,9 +626,14 @@ static int RecordShotQuad(const Viewport *viewport, const ShotImage *image,
         corners[corner * 2] = x + along * axisX - across * axisY;
         corners[corner * 2 + 1] = y + along * axisY + across * axisX;
     }
-    return SdlGlRendererRecordImage(
-        viewport, trailLength > 0.0f ? image->trailHandle : image->ballHandle,
-        corners, tint);
+    if (!SdlGlRendererRecordImage(
+            viewport,
+            trailLength > 0.0f ? image->trailHandle : image->ballHandle,
+            corners, tint))
+        return 0;
+    /* --hdr: the bolt's hot core glows above white. */
+    SdlGlRendererSetLastHdrGain(SdlHdrGain());
+    return 1;
 }
 
 int SdlFineShotDraw(const Viewport *viewport, short obj, float x, float y,

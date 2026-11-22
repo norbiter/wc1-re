@@ -29,6 +29,9 @@ typedef void (APIENTRY *GlBlendFuncProc)(GLenum source, GLenum destination);
 typedef void (APIENTRY *GlBufferDataProc)(GLenum target, GLsizeiptr size,
                                             const void *data, GLenum usage);
 typedef void (APIENTRY *GlClearProc)(GLbitfield mask);
+typedef void (APIENTRY *GlReadPixelsProc)(GLint x, GLint y, GLsizei width,
+                                          GLsizei height, GLenum format,
+                                          GLenum type, void *pixels);
 typedef void (APIENTRY *GlClearColorProc)(GLfloat red, GLfloat green,
                                             GLfloat blue, GLfloat alpha);
 typedef void (APIENTRY *GlCompileShaderProc)(GLuint shader);
@@ -115,6 +118,7 @@ typedef struct GlFunctions {
     GlBlendFuncProc BlendFunc;
     GlBufferDataProc BufferData;
     GlClearProc Clear;
+    GlReadPixelsProc ReadPixels;
     GlClearColorProc ClearColor;
     GlCompileShaderProc CompileShader;
     GlCreateProgramProc CreateProgram;
@@ -214,6 +218,10 @@ typedef struct GlSprite {
        its triangles sample, with the u, v in the first two colour floats and
        overlayColour as a tint. */
     int imageSlot;
+    /* --hdr: how far above standard white this entry may go, 0 for none.
+       An image's near-white texels are lifted by it, the rest of an image
+       and other entries keep their colour but are not clamped to white. */
+    float hdrGain;
 } GlSprite;
 
 typedef struct GlShipPoint {
@@ -423,6 +431,7 @@ static const GLchar g_shipFragmentShaderSource[] =
     "uniform vec4 u_clip;\n"
     "uniform int u_image;\n"
     "uniform sampler2D u_imageTexture;\n"
+    "uniform float u_hdrGain;\n"
     "in vec3 v_colour;\n"
     "in float v_alpha;\n"
     "in vec2 v_uv;\n"
@@ -452,7 +461,14 @@ static const GLchar g_shipFragmentShaderSource[] =
     "        vec4 image = texture(u_imageTexture, v_uv);\n"
     "        outputColour = vec4(\n"
     "            min(image.rgb * v_colour, vec3(image.a)), image.a);\n"
+    "        if (u_hdrGain > 0.0 && image.a > 0.0) {\n"
+    "            float level = max(max(outputColour.r, outputColour.g),\n"
+    "                              outputColour.b) / image.a;\n"
+    "            outputColour.rgb *= 1.0 + u_hdrGain *\n"
+    "                smoothstep(0.6, 1.0, level) * image.a;\n"
+    "        }\n"
     "    }\n"
+    "    outputColour.rgb = min(outputColour.rgb, vec3(1.0 + u_hdrGain));\n"
     "}\n";
 
 /* --ttf-text: TrueType glyphs from a coverage atlas, in a palette entry so
@@ -515,6 +531,7 @@ typedef struct GlRenderer {
     GLint shipTrueColourUniform;
     GLint shipImageUniform;
     GLint shipImageTextureUniform;
+    GLint shipHdrGainUniform;
     GLint shipFrameUniform;
     GLint baseFrameUniform;
     GLint spriteFrameUniform;
@@ -668,6 +685,7 @@ static int LoadGlFunctions(void)
     LOAD_GL_FUNCTION(BlendFunc, GlBlendFuncProc, "glBlendFunc");
     LOAD_GL_FUNCTION(BufferData, GlBufferDataProc, "glBufferData");
     LOAD_GL_FUNCTION(Clear, GlClearProc, "glClear");
+    LOAD_GL_FUNCTION(ReadPixels, GlReadPixelsProc, "glReadPixels");
     LOAD_GL_FUNCTION(ClearColor, GlClearColorProc, "glClearColor");
     LOAD_GL_FUNCTION(CompileShader, GlCompileShaderProc,
                          "glCompileShader");
@@ -857,6 +875,8 @@ static int LoadGlUniformLocations(void)
         g_renderer.shipProgram, "u_image");
     g_renderer.shipImageTextureUniform = g_renderer.gl.GetUniformLocation(
         g_renderer.shipProgram, "u_imageTexture");
+    g_renderer.shipHdrGainUniform = g_renderer.gl.GetUniformLocation(
+        g_renderer.shipProgram, "u_hdrGain");
     g_renderer.baseFrameUniform = g_renderer.gl.GetUniformLocation(
         g_renderer.baseProgram, "u_frame");
     g_renderer.spriteFrameUniform = g_renderer.gl.GetUniformLocation(
@@ -1334,6 +1354,7 @@ static void DrawRecordedShip(const GlSprite *ship, float outputScale,
                             ship->overlayColour[2]);
     g_renderer.gl.Uniform1i(g_renderer.shipImageUniform,
                             ship->imageSlot != 0);
+    g_renderer.gl.Uniform1f(g_renderer.shipHdrGainUniform, ship->hdrGain);
     if (ship->imageSlot != 0) {
         GlImage *image = &g_renderer.images[ship->imageSlot - 1];
 
@@ -1570,6 +1591,7 @@ static int RenderGlFrame(const unsigned char *pixels,
         return 0;
     if (SDL_GL_MakeCurrent(g_renderer.window, g_renderer.context) != 0)
         return 0;
+    SdlHdrBeginFrame();
     pixels = SdlComposeFrame(pixels, &g_renderer.frameWidth,
                              &g_renderer.frameHeight);
     /* Sprites recorded for a frame of another size would land in the wrong
@@ -1675,6 +1697,7 @@ int SdlGlRendererInitialize(SDL_Window *window)
         return 0;
     g_renderer.window = window;
     g_uGlImageGeneration++;
+    SdlHdrPrepareWindow(window);
     g_renderer.context = SDL_GL_CreateContext(window);
     if (g_renderer.context == 0) {
         fprintf(stderr, "OpenGL context creation failed: %s\n",
@@ -1686,6 +1709,17 @@ int SdlGlRendererInitialize(SDL_Window *window)
         !LoadGlFunctions()) {
         SdlGlRendererShutdown();
         return 0;
+    }
+    if (SdlHdrRequested()) {
+        /* Whether the surface keeps a value above white. */
+        GLfloat probe[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+        g_renderer.gl.ClearColor(2.0f, 2.0f, 2.0f, 1.0f);
+        g_renderer.gl.Clear(GL_COLOR_BUFFER_BIT);
+        g_renderer.gl.ReadPixels(0, 0, 1, 1, GL_RGBA, GL_FLOAT, probe);
+        g_renderer.gl.ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        g_renderer.gl.Clear(GL_COLOR_BUFFER_BIT);
+        SdlHdrSetSurface(probe[0] > 1.5f);
     }
     maxTextureSize = 0;
     maxArrayTextureLayers = 0;
@@ -2082,6 +2116,15 @@ int SdlGlRendererRecordColourOverlay(const Viewport *viewport,
     static const float unused[3] = { 1.0f, 1.0f, 1.0f };
 
     return RecordShipVertices(viewport, vertices, count, 7, 0.0f, 1, unused);
+}
+
+/* --hdr: lets the entry just recorded go gain above standard white. */
+void SdlGlRendererSetLastHdrGain(float gain)
+{
+    if (g_renderer.frameState != GL_RENDERER_FRAME_RECORDING ||
+        g_renderer.spriteCount == 0 || gain <= 0.0f)
+        return;
+    g_renderer.recordedSprites[g_renderer.spriteCount - 1].hdrGain = gain;
 }
 
 /* Takes a copy of a premultiplied RGBA image for image overlays.  Returns a

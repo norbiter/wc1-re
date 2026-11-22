@@ -47,6 +47,9 @@ int SdlConfigureVideoWindow(Uint32 *windowFlags)
     if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS,
                             SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG) != 0)
         return 0;
+    /* --hdr: half floats, so light can go past standard white. */
+    if (SdlHdrRequested() && SDL_GL_SetAttribute(SDL_GL_FLOATBUFFERS, 1) != 0)
+        return 0;
 #endif
     *windowFlags |= SDL_WINDOW_OPENGL;
     return 1;

@@ -23,7 +23,16 @@
  * Only the large suns dazzle (the red sun, the red giant and Secret Missions
  * 2's large yellow sun); their colour comes from a palette entry, so the
  * glare follows palette fades.  The sun is the one --backdrop-light ranks
- * first among large suns. */
+ * first among large suns.
+ *
+ * With --hdr and --fine-backdrop, the haze also blooms above white (see
+ * hdr.c): at full strength over the sun's disc, falling off past its edge.
+ * Over the disc the haze is all but opaque, so without the bloom there it
+ * would hide the disc's own hot core under standard white, leaving the
+ * corona brighter than the sun.  The bloom falls with the eclipse like the
+ * rest of the haze.  Without --fine-backdrop the disc is drawn in the
+ * 320x200 frame at standard brightness, and a bloom brighter than the disc
+ * would look wrong. */
 #include "wc1.h"
 
 #include <math.h>
@@ -41,6 +50,10 @@
 /* Strength of the tight glow round the sun and of the wide veil. */
 #define GLARE_CORE 0.7f
 #define GLARE_VEIL 0.3f
+/* --hdr: how far out the bloom keeps full strength, and how quickly it
+ * falls past that, in sun radii. */
+#define GLARE_BLOOM_DISC 0.5f
+#define GLARE_BLOOM_FALL 0.6f
 
 typedef struct GlareSun {
     short shapeId;
@@ -235,15 +248,29 @@ static float GetGlareOpacity(float distance)
     return opacity > 1.0f ? 1.0f : opacity;
 }
 
-static float *AppendGlareVertex(float *out, float x, float y,
-                                const float colour[3], float alpha)
+/* --hdr: the bloom's light above white at distance from the sun's centre,
+ * in sun radii, as a share of the headroom: all of it over the disc. */
+static float GetGlareBloom(float distance)
 {
+    if (distance <= GLARE_BLOOM_DISC)
+        return 1.0f;
+    return expf(-(distance - GLARE_BLOOM_DISC) / GLARE_BLOOM_FALL);
+}
+
+/* A vertex of opacity alpha, with bloom light added over it: the colour is
+ * scaled so that, premultiplied, it carries both. */
+static float *AppendGlareVertex(float *out, float x, float y,
+                                const float colour[3], float alpha,
+                                float bloom)
+{
+    float scale = alpha > 0.0001f ? (alpha + bloom) / alpha : 1.0f;
+
     out[0] = x;
     out[1] = y;
     out[2] = 0.0f;
-    out[3] = colour[0];
-    out[4] = colour[1];
-    out[5] = colour[2];
+    out[3] = colour[0] * scale;
+    out[4] = colour[1] * scale;
+    out[5] = colour[2] * scale;
     out[6] = alpha;
     return out + GLARE_FLOATS;
 }
@@ -255,9 +282,12 @@ void SdlGlareDraw(const Viewport *viewport)
         0.5f, 0.8f, 1.1f, 1.5f, 2.0f, 3.0f, 4.5f, 7.0f, 11.0f, 16.0f, 24.0f
     };
     float ringAlpha[GLARE_RINGS];
+    float ringBloom[GLARE_RINGS];
     float colour[3];
+    float hdrGain;
     float strength;
     float centreAlpha;
+    float centreBloom;
     float *out = g_afGlareVertices;
     int segment;
     int ring;
@@ -289,6 +319,11 @@ void SdlGlareDraw(const Viewport *viewport)
     for (ring = 0; ring < GLARE_RINGS; ring++)
         ringAlpha[ring] = GetGlareOpacity(ringRadius[ring]) * strength;
     ringAlpha[GLARE_RINGS - 1] = 0.0f;
+    hdrGain = SdlFineBackdropEnabled() ? SdlHdrGain() : 0.0f;
+    for (ring = 0; ring < GLARE_RINGS; ring++)
+        ringBloom[ring] = hdrGain * strength * GetGlareBloom(ringRadius[ring]);
+    ringBloom[GLARE_RINGS - 1] = 0.0f;
+    centreBloom = hdrGain * strength * GetGlareBloom(0.0f);
 
     for (segment = 0; segment < GLARE_SEGMENTS; segment++) {
         float angle0 = 6.28318531f * (float)segment / GLARE_SEGMENTS;
@@ -300,32 +335,37 @@ void SdlGlareDraw(const Viewport *viewport)
         float x = g_fGlareX;
         float y = g_fGlareY;
 
-        out = AppendGlareVertex(out, x, y, colour, centreAlpha);
+        out = AppendGlareVertex(out, x, y, colour, centreAlpha, centreBloom);
         out = AppendGlareVertex(out, x + cos0 * ringRadius[0],
                                 y + sin0 * ringRadius[0], colour,
-                                ringAlpha[0]);
+                                ringAlpha[0], ringBloom[0]);
         out = AppendGlareVertex(out, x + cos1 * ringRadius[0],
                                 y + sin1 * ringRadius[0], colour,
-                                ringAlpha[0]);
+                                ringAlpha[0], ringBloom[0]);
         for (ring = 0; ring + 1 < GLARE_RINGS; ring++) {
             float inner = ringRadius[ring];
             float outer = ringRadius[ring + 1];
 
             out = AppendGlareVertex(out, x + cos0 * inner, y + sin0 * inner,
-                                    colour, ringAlpha[ring]);
+                                    colour, ringAlpha[ring], ringBloom[ring]);
             out = AppendGlareVertex(out, x + cos0 * outer, y + sin0 * outer,
-                                    colour, ringAlpha[ring + 1]);
+                                    colour, ringAlpha[ring + 1],
+                                    ringBloom[ring + 1]);
             out = AppendGlareVertex(out, x + cos1 * inner, y + sin1 * inner,
-                                    colour, ringAlpha[ring]);
+                                    colour, ringAlpha[ring], ringBloom[ring]);
             out = AppendGlareVertex(out, x + cos1 * inner, y + sin1 * inner,
-                                    colour, ringAlpha[ring]);
+                                    colour, ringAlpha[ring], ringBloom[ring]);
             out = AppendGlareVertex(out, x + cos0 * outer, y + sin0 * outer,
-                                    colour, ringAlpha[ring + 1]);
+                                    colour, ringAlpha[ring + 1],
+                                    ringBloom[ring + 1]);
             out = AppendGlareVertex(out, x + cos1 * outer, y + sin1 * outer,
-                                    colour, ringAlpha[ring + 1]);
+                                    colour, ringAlpha[ring + 1],
+                                    ringBloom[ring + 1]);
         }
     }
-    SdlGlRendererRecordColourOverlay(
-        viewport, g_afGlareVertices,
-        (int)((out - g_afGlareVertices) / GLARE_FLOATS));
+    if (SdlGlRendererRecordColourOverlay(
+            viewport, g_afGlareVertices,
+            (int)((out - g_afGlareVertices) / GLARE_FLOATS)) &&
+        hdrGain > 0.0f)
+        SdlGlRendererSetLastHdrGain(hdrGain);
 }

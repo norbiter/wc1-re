@@ -81,6 +81,10 @@ static void SdlPrintUsage(FILE *stream)
           "                          backdrop's sun or lit planet\n"
           "  --glare                 With --enhanced, a large sun dazzles: a haze\n"
           "                          round it, and 3D ships before it in silhouette\n"
+          "  --hdr[=PCT]             With --enhanced on a macOS HDR display, suns\n"
+          "                          (--fine-backdrop), glare (--glare) and gun\n"
+          "                          shots (--fine-shots) glow above white; PCT\n"
+          "                          scales the extra brightness (default 100)\n"
           "  --ttf-text              With --enhanced, draw text in the Space Wing\n"
           "                          Leader TrueType font at display resolution\n"
           "  --ai-throttle[=N]       Tune AI update throttling\n"
@@ -210,6 +214,10 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
             SdlBackdropLightEnable();
         } else if (strcmp(argument, "--glare") == 0) {
             SdlGlareEnable();
+        } else if (strcmp(argument, "--hdr") == 0) {
+            SdlHdrEnable(0);
+        } else if (strncmp(argument, "--hdr=", 6) == 0) {
+            SdlHdrEnable(atoi(argument + 6));
         } else if (strcmp(argument, "--ttf-text") == 0) {
             SdlTtfTextEnable();
         } else if (strcmp(argument, "--ai-throttle") == 0) {
