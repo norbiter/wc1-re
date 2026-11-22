@@ -201,6 +201,7 @@ int SdlPresentIndexedFrame(const unsigned char *pixels,
     if (SDL_UpdateTexture(g_pSdlFrameTexture, 0, g_adwSdlFramePixels,
                           frameWidth * (int)sizeof(Uint32)) != 0)
         return 0;
+    SdlCaptureFrameArgb(g_adwSdlFramePixels, frameWidth, frameHeight);
     if (SDL_RenderClear(g_pSdlRenderer) != 0)
         return 0;
     if (SDL_RenderCopy(g_pSdlRenderer, g_pSdlFrameTexture, 0, &dest) != 0)

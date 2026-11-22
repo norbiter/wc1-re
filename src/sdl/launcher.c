@@ -574,6 +574,8 @@ int main(int argumentCount, char **arguments)
     }
 
     windowFlags = SDL_WINDOW_RESIZABLE;
+    if (SdlCaptureHiddenWindow())
+        windowFlags |= SDL_WINDOW_HIDDEN;
     if (launcherOptions.fullscreen)
         windowFlags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
     if (!SdlConfigureVideoWindow(&windowFlags)) {
@@ -598,7 +600,8 @@ int main(int argumentCount, char **arguments)
     if (SdlUsingTownsJapanese())
 #endif
     SDL_StopTextInput();
-    if (useLauncherGui) {
+    SdlCaptureInitialize();
+    if (useLauncherGui && !SdlCaptureHiddenWindow()) {
         /* Hand focus from Slint's native event loop to the SDL game window. */
         SDL_ShowWindow(window);
         SDL_RaiseWindow(window);

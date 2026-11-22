@@ -569,6 +569,7 @@ MODERN_GAME_HOST_SRCS = \
 	src/swc/shape.c \
 	src/swc/rsrc.c \
 	src/sdl/audio.c \
+	src/sdl/capture.c \
 	src/sdl/dos_intro.c \
 	src/sdl/events.c \
 	src/sdl/gl_renderer.c \
@@ -890,6 +891,12 @@ run-modern-gui: modern-gui
 		exit 1; \
 	}; \
 	cd "$$modern_run_dir" && "$(CURDIR)/$(MODERN_GUI_TARGET)" --gui $(MODERN_ARGS)
+
+# Runs with no window and no sound device; combine with the WC1_CAPTURE_*
+# and WC1_INPUT_SCRIPT variables documented in src/sdl/capture.c.
+run-modern-headless: export SDL_VIDEODRIVER = dummy
+run-modern-headless: export SDL_AUDIODRIVER = dummy
+run-modern-headless: run-modern
 
 # The SDL2 host recognizes the compressed resources in an installed DOS copy
 # and plays its OriginFX music and synthesized effects through an embedded
@@ -1401,6 +1408,7 @@ clean-modern:
 	run-check \
 	run-modern \
 	run-modern-gui \
+	run-modern-headless \
 	run-modern-dos \
 	run-modern-mission \
 	seh \

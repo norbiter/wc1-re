@@ -160,7 +160,33 @@ On top of upstream's improvements, this fork adds the following.
 | Cockpit-less flight (`c`) fills a fullscreen display of any shape instead of sitting in a 4:3 box: on a wider display the view gains field of view at the sides, on a taller one above and below. The middle of the picture is exactly the 4:3 one, and the instruments stay in that middle block. Windowed play, the cockpit views and everything outside flight keep the original 4:3 frame; switching to or from fullscreen in flight takes effect on the next frame | `--aspectless` |
 | Cockpit-less flight (`c`) can use a wider or narrower field of view than the original 90 degrees across the 4:3 picture. Ships, the nav cross and the overlays drawn over ships all follow it; a wider view makes everything smaller, but ships stay drawn and targetable out to the original range, and a missile lock holds over the original angle. The cockpit views keep the original perspective. Combines with `--aspectless`, which adds its extra width on top | `--fov=DEGREES` (60-140) |
 | Debug mission picker: hold Alt while loading a saved game to jump to any series and mission (left/right = series, up/down = mission, Enter = go, Esc = keep the save as it was). Ship type follows the series that leads into the chosen one | `--mission-menu` |
+| Headless capture for automated testing: runs the game with no visible window and no sound, saves frames as PNG files and the mixed audio as a WAV, and plays scripted key and mouse input (see "Headless capture" below) | `WC1_CAPTURE_DIR`, `WC1_INPUT_SCRIPT` and related environment variables |
 | Unknown `--` options are rejected with a list of the accepted ones (`MODERN_ARGS=--help` shows it without starting the game) | `--help` |
+
+### Headless capture
+
+For checking a change without touching the desktop, the game can run
+privately, driven by environment variables (full reference at the top of
+`src/sdl/capture.c`):
+
+| Variable | Effect |
+| --- | --- |
+| `WC1_CAPTURE_DIR=dir` | Write PNG frames to `dir` (the 320x200 frame, or the GL output size with `--enhanced`) |
+| `WC1_CAPTURE_INTERVAL=ms` | Also save a frame every `ms` milliseconds |
+| `WC1_CAPTURE_AUDIO=file.wav` | Record the mixed game audio (22050 Hz stereo; not FM Towns CD audio) |
+| `WC1_INPUT_SCRIPT=file` | Play timed input: `wait MS`, `key NAME [HOLD]`, `down`/`up NAME`, `text STRING`, `mouse X Y`, `click X Y [right]`, `shot [NAME]`, `quit` |
+| `WC1_HIDDEN=1` | Create the game window hidden (needed for `--enhanced`, which requires a real OpenGL context) |
+
+```sh
+# Classic renderer: no window, no audio device.
+WC1_CAPTURE_DIR=/tmp/cap WC1_INPUT_SCRIPT=test.script make run-modern-headless
+# Enhanced renderer: hidden window, silent audio device.
+WC1_HIDDEN=1 SDL_AUDIODRIVER=dummy WC1_CAPTURE_DIR=/tmp/cap \
+    WC1_INPUT_SCRIPT=test.script make run-modern MODERN_ARGS=--enhanced
+```
+
+Script times are wall-clock milliseconds from the first event pump, so
+leave generous waits around loading and intros.
 
 ### Known mission quirks and ideas
 

@@ -203,6 +203,14 @@ void SdlStopRadioVoice(void);
  * diagnostic build defines SDL_PORT_LEGACY_DEBUG_OUTPUT. */
 void SdlOutputDebugString(const char *text);
 void SdlPumpEvents(void);
+/* Headless capture for automated testing (src/sdl/capture.c). */
+void SdlCaptureInitialize(void);
+void SdlCaptureServiceInput(void);
+int SdlCaptureHiddenWindow(void);
+int SdlCaptureFrameWanted(void);
+void SdlCaptureFrameRgb(const unsigned char *rgb, int width, int height);
+void SdlCaptureFrameArgb(const Uint32 *pixels, int width, int height);
+void SdlCaptureAudio(const unsigned char *samples, unsigned int bytes);
 /* Slot 8 is always reserved in the SDL barracks, even with autosave off. */
 #define SDL_AUTOSAVE_SLOT 7
 void SdlConfigureAutosave(int enabled);

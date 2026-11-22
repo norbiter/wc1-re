@@ -37,6 +37,7 @@ static void SdlAudioCallback(void *userData, Uint8 *stream, int bytes)
                            count, SDL_VOICE_VOLUME);
         voicePosition += count;
     }
+    SdlCaptureAudio(stream, (unsigned int)bytes);
     if (g_pAudioTick != 0)
         *g_pAudioTick = *g_pAudioTick + 1;
     LeaveCriticalSection(g_pAudioCriticalSection);

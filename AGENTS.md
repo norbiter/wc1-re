@@ -40,6 +40,11 @@ fixes. It does not pursue a byte-identical reconstruction.
   running (`make run-modern`, `make run-modern-dos`). `make verify`, `make compare`,
   `make report`, and `binary-comp` are upstream's reconstruction tooling and are not
   required here.
+- **To see or hear the running game, use headless capture, never screen capture**
+  (which grabs the user's other windows). `make run-modern-headless` with
+  `WC1_CAPTURE_DIR` / `WC1_INPUT_SCRIPT` writes PNG frames from scripted input;
+  `--enhanced` needs `WC1_HIDDEN=1` instead. See the README's "Headless capture"
+  section and `src/sdl/capture.c`.
 - **Where changes go:** prefer `src/sdl/` and `third_party/`. When shared game logic
   must change, put the change in the `SDL_PORT` arm of an `#ifdef SDL_PORT` /
   `#ifndef SDL_PORT` conditional, and leave the other arm as upstream has it.

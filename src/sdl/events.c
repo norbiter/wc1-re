@@ -720,6 +720,7 @@ void SdlPumpEvents(void)
     if (SdlSwcFlightActive())
         return;
 
+    SdlCaptureServiceInput();
     SdlServiceOriginFxMusic();
     SdlRepeatMouseKeys();
     SdlServiceKeyRepeats();

@@ -1576,6 +1576,29 @@ static void PrepareTtfTextFrame(const unsigned char *pixels)
                       (float)viewportHeight / frameHeight);
 }
 
+/* Reads the finished back buffer for WC1_CAPTURE_DIR, top row first. */
+static void CaptureGlFrame(int left, int bottom, int width, int height)
+{
+    unsigned char *rgb;
+    unsigned char *flipped;
+    int row;
+
+    rgb = malloc((size_t)width * height * 3);
+    flipped = malloc((size_t)width * height * 3);
+    if (rgb != 0 && flipped != 0) {
+        g_renderer.gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
+        g_renderer.gl.ReadPixels(left, bottom, width, height, GL_RGB,
+                                 GL_UNSIGNED_BYTE, rgb);
+        for (row = 0; row < height; row++)
+            memcpy(flipped + (size_t)row * width * 3,
+                   rgb + (size_t)(height - 1 - row) * width * 3,
+                   (size_t)width * 3);
+        SdlCaptureFrameRgb(flipped, width, height);
+    }
+    free(rgb);
+    free(flipped);
+}
+
 static int RenderGlFrame(const unsigned char *pixels,
                          const unsigned char *palette, int drawSprites)
 {
@@ -1637,6 +1660,9 @@ static int RenderGlFrame(const unsigned char *pixels,
                             viewportLeft, viewportBottom, viewportWidth,
                             viewportHeight);
     DrawTtfText();
+    if (SdlCaptureFrameWanted())
+        CaptureGlFrame(viewportLeft, viewportBottom, viewportWidth,
+                       viewportHeight);
     SDL_GL_SwapWindow(g_renderer.window);
     return 1;
 }
