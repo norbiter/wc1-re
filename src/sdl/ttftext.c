@@ -15,7 +15,11 @@
  *   slot, since the newer glyph would win there anyway; other new glyphs
  *   take a free slot, and only a full table gives up its oldest record.
  *   Text the game draws once, such as the cockpit's VDU labels, so keeps
- *   its record while readouts redraw themselves every tick.
+ *   its record while readouts redraw themselves every tick.  A glyph whose
+ *   ink mostly matches what was already under it does not show, so it is
+ *   not recorded and drops the record it was drawn over: the game erases a
+ *   message by drawing it again in the background colour, which over the
+ *   cockpitless view's black space would otherwise hold indefinitely.
  *
  *   Verification.  When a frame is presented, a glyph counts only while every
  *   pixel it wrote is still on screen.  Anything that drew over it, cleared
@@ -361,6 +365,9 @@ void SdlTtfTextEndGlyph(const TextContext *context)
     unsigned short latest;
     int row;
     int index;
+    int pixel;
+    int inkCount;
+    int shownCount;
 
     if (!g_bTtfTextPending)
         return;
@@ -371,9 +378,19 @@ void SdlTtfTextEndGlyph(const TextContext *context)
                    context->viewport->rowOffsets[record->y + row] +
                    record->x,
                (size_t)record->width);
-    /* A glyph drawn in exactly the cell of an earlier one replaces its
-     * record: the newer glyph wins that cell, and its "before" pixels
-     * already reach under the earlier one. */
+    inkCount = 0;
+    shownCount = 0;
+    for (pixel = 0; pixel < TTF_TEXT_CELL_LIMIT * TTF_TEXT_CELL_LIMIT;
+         pixel++) {
+        if (record->ink[pixel]) {
+            inkCount++;
+            if (record->after[pixel] != record->before[pixel])
+                shownCount++;
+        }
+    }
+    /* A glyph drawn exactly over an earlier one replaces its record: the
+     * newer glyph wins that cell, and its "before" pixels already reach
+     * under the earlier one. */
     index = -1;
     latest = g_awTtfTextLatestAt[record->y * SDL_PORT_FRAME_WIDTH + record->x];
     if (latest != 0) {
@@ -382,6 +399,18 @@ void SdlTtfTextEndGlyph(const TextContext *context)
             earlier->y == record->y && earlier->width == record->width &&
             earlier->height == record->height)
             index = latest - 1;
+    }
+    /* Ink mostly in the colour already under it, such as a message erased
+     * by drawing it again in the background colour, does not show, so it
+     * is not recorded.  Over the cockpitless view's black space such a
+     * glyph would otherwise hold for as long as space stays black. */
+    if (shownCount * 2 < inkCount) {
+        if (index >= 0) {
+            g_astTtfTextRecords[index].used = 0;
+            g_awTtfTextLatestAt[record->y * SDL_PORT_FRAME_WIDTH + record->x] =
+                0;
+        }
+        return;
     }
     if (index < 0)
         index = TakeTtfTextSlot();
