@@ -1119,6 +1119,9 @@ unsigned int accelerate_and_move_object(short obj)
             zero_vector(&accelerationVector);
             switch (aeSpecialManeuvers[obj]) {
             case SPECIAL_MANEUVER_AFTERBURNER:
+#ifdef SDL_PORT
+                SdlNpcFuelAfterburnerTick(obj);
+#endif
                 asShipAfterburnerTimer[obj]--;
                 if (asShipAfterburnerTimer[obj] == 0) {
                     aeSpecialManeuvers[obj] =

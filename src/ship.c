@@ -282,6 +282,7 @@ void set_objects_data(short obj, enum ObjectType type, short owner)
                         sizeof(aSwcWeaponAmmo[obj]));
             SdlLowMissileTrim(obj, type);
             SdlSturdyFriendsBoost(obj, type);
+            SdlLowEnemyFuelTrim(obj, type);
 #endif
 
             if (obj == 0) {
@@ -2206,6 +2207,10 @@ void fire_afterburner(short obj, short time)
 {
     short timer;
 
+#ifdef SDL_PORT
+    if (SdlNpcFuelEmpty(obj))
+        return;
+#endif
     if (Vector_magnitude(&aShipVelocity[obj]) <
         get_ship_max_velocity(obj) * 0x500L) {
         set_special(obj, SPECIAL_MANEUVER_AFTERBURNER);

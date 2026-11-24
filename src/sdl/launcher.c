@@ -96,6 +96,8 @@ static void SdlApplyLowMissile(const char *value) { (void)value; SdlLowMissileEn
 static void SdlApplySturdyFriends(const char *value) { (void)value; SdlSturdyFriendsEnable(); }
 static void SdlApplyFairAsteroids(const char *value) { (void)value; SdlFairAsteroidsEnable(); }
 static void SdlApplyAiThrottle(const char *value) { SdlAiThrottleEnable(value ? atoi(value) : 0); }
+static void SdlApplyNpcFuel(const char *value) { (void)value; SdlNpcFuelEnable(); }
+static void SdlApplyLowEnemyFuel(const char *value) { (void)value; SdlLowEnemyFuelEnable(); }
 static void SdlApplyMouseCurve(const char *value) { SdlMouseCurveEnable(value ? atoi(value) : 0); }
 static void SdlApplyJoystickCurve(const char *value) { SdlJoystickCurveEnable(value ? atoi(value) : 0); }
 static void SdlApplyHitSpheres(const char *value) { (void)value; SdlHitSphereEnable(); }
@@ -105,6 +107,9 @@ static void SdlApplyJoystickDebug(const char *value) { (void)value; SdlEnableJoy
 static const SdlFeatureOption g_astSdlFeatures[] = {
     {"gun-range", NULL, SDL_FEATURE_GROUP_DEFAULT, 0, SdlApplyGunRange,
      "Crosshair dark until the target is in gun range"},
+    {"npc-fuel", NULL, SDL_FEATURE_GROUP_DEFAULT, 0, SdlApplyNpcFuel,
+     "Wingmen and enemies can't afterburn on an empty tank, as the "
+     "player can't"},
     {"shield-flash", NULL, SDL_FEATURE_GROUP_DEFAULT, 0, SdlApplyShieldFlash,
      "Flash a hemisphere over a ship when its shields take a hit"},
     {"smooth", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplySmooth,
@@ -147,6 +152,8 @@ static const SdlFeatureOption g_astSdlFeatures[] = {
      "No asteroids spawned on an intercept course"},
     {"ai-throttle", "N", SDL_FEATURE_GROUP_EASIER, 0, SdlApplyAiThrottle,
      "Above N fighters in flight (default 6), each decides less often"},
+    {"low-enemy-fuel", NULL, SDL_FEATURE_GROUP_EASIER, 0, SdlApplyLowEnemyFuel,
+     "Kilrathi ships spawn with a quarter of their rated fuel"},
     {"mouse-curve", "PCT", SDL_FEATURE_GROUP_OTHER, 0, SdlApplyMouseCurve,
      "Smooth linear-to-exponential mouse steering; PCT scales sensitivity "
      "(default 100)"},
