@@ -84,6 +84,7 @@ static void SdlApplyAspectless(const char *value) { (void)value; SdlAspectlessEn
 static void SdlApplyFineStars(const char *value) { (void)value; SdlFineStarsEnable(); }
 static void SdlApplyFineBackdrop(const char *value) { (void)value; SdlFineBackdropEnable(); }
 static void SdlApplyFineShots(const char *value) { (void)value; SdlFineShotsEnable(); }
+static void SdlApplyFineHud(const char *value) { (void)value; SdlFineHudEnable(); }
 static void SdlApplyGlare(const char *value) { (void)value; SdlGlareEnable(); }
 static void SdlApplyHdr(const char *value) { SdlHdrEnable(value ? atoi(value) : 0); }
 static void SdlApplyTtfText(const char *value) { (void)value; SdlTtfTextEnable(); }
@@ -125,6 +126,9 @@ static const SdlFeatureOption g_astSdlFeatures[] = {
      "Planets, suns and nebulae redrawn at display resolution"},
     {"fine-shots", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyFineShots,
      "Gun shots redrawn at display resolution as bolts"},
+    {"fine-hud", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyFineHud,
+     "Crosshair, lock marker, nav pointer and target brackets drawn as "
+     "display-resolution lines"},
     {"glare", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyGlare,
      "A large sun dazzles: a haze round it, and 3D ships before it in "
      "silhouette"},

@@ -7,6 +7,7 @@
 #endif
 #include <SDL_opengl.h>
 
+#include <math.h>
 #include <stddef.h>
 
 #ifndef GL_PROGRAM_POINT_SIZE
@@ -505,6 +506,99 @@ static const GLchar g_textFragmentShaderSource[] =
     "    outputColour = vec4(colour * coverage, coverage);\n"
     "}\n";
 
+/* --fine-hud: antialiased lines and rings in a palette entry, drawn over the
+   space layer.  Positions and the shape's local offsets are frame pixels;
+   u_scale is display pixels per frame pixel across and down, so a ring that
+   is round in frame pixels keeps the original's aspect.  a_hudShape holds
+   the kind (0 segment, 1 ring), the half length or radius, the half width
+   and the palette entry; a segment runs along a_hudAxis. */
+static const GLchar g_hudVertexShaderSource[] =
+    "#version 150\n"
+    "in vec2 a_position;\n"
+    "in vec2 a_texCoord;\n"
+    "in vec4 a_hudShape;\n"
+    "in vec4 a_hudClip;\n"
+    "in vec2 a_hudAxis;\n"
+    "uniform vec4 u_frame;\n"
+    "out vec2 v_local;\n"
+    "out vec2 v_screen;\n"
+    "flat out vec4 v_shape;\n"
+    "flat out vec4 v_clip;\n"
+    "flat out vec2 v_axis;\n"
+    "void main()\n"
+    "{\n"
+    "    vec2 position;\n"
+    "    position.x = (a_position.x + 0.5) / u_frame.x * 2.0 - 1.0;\n"
+    "    position.y = 1.0 - (a_position.y + 0.5) / u_frame.y * 2.0;\n"
+    "    gl_Position = vec4(position, 0.0, 1.0);\n"
+    "    v_local = a_texCoord;\n"
+    "    v_screen = a_position;\n"
+    "    v_shape = a_hudShape;\n"
+    "    v_clip = a_hudClip;\n"
+    "    v_axis = a_hudAxis;\n"
+    "}\n";
+
+static const GLchar g_hudFragmentShaderSource[] =
+    "#version 150\n"
+    "uniform sampler2D u_palette;\n"
+    "uniform sampler2D u_viewMask;\n"
+    "uniform vec4 u_scale;\n"
+    "in vec2 v_local;\n"
+    "in vec2 v_screen;\n"
+    "flat in vec4 v_shape;\n"
+    "flat in vec4 v_clip;\n"
+    "flat in vec2 v_axis;\n"
+    "out vec4 outputColour;\n"
+    "void main()\n"
+    "{\n"
+    "    if (v_screen.x < v_clip.x - 0.5 || v_screen.y < v_clip.y - 0.5 ||\n"
+    "        v_screen.x > v_clip.z + 0.5 || v_screen.y > v_clip.w + 0.5)\n"
+    "        discard;\n"
+    "    ivec2 logical = ivec2(floor(v_screen + vec2(0.5)));\n"
+    "    ivec2 frame = textureSize(u_viewMask, 0);\n"
+    "    if (logical.x < 0 || logical.y < 0 ||\n"
+    "        logical.x >= frame.x || logical.y >= frame.y)\n"
+    "        discard;\n"
+    "    if (texelFetch(u_viewMask, logical, 0).r < 0.5)\n"
+    "        discard;\n"
+    "    float coverage;\n"
+    "    float wanted;\n"
+    "    if (v_shape.x < 0.5) {\n"
+    "        vec2 across = vec2(-v_axis.y, v_axis.x);\n"
+    "        float alongScale = length(v_axis * u_scale.xy);\n"
+    "        float acrossScale = length(across * u_scale.xy);\n"
+    "        float halfWidth = v_shape.z * acrossScale;\n"
+    "        float capWidth = v_shape.z * alongScale;\n"
+    "        wanted = halfWidth * 2.0;\n"
+    "        halfWidth = max(halfWidth, 0.5);\n"
+    "        capWidth = max(capWidth, 0.5);\n"
+    "        float along = abs(dot(v_local, v_axis)) * alongScale;\n"
+    "        float side = abs(dot(v_local, across)) * acrossScale;\n"
+    "        coverage =\n"
+    "            clamp(v_shape.y * alongScale + capWidth + 0.5 - along,\n"
+    "                  0.0, 1.0) *\n"
+    "            clamp(halfWidth + 0.5 - side, 0.0, 1.0);\n"
+    "    } else {\n"
+    "        float radius = length(v_local);\n"
+    "        vec2 normal = radius > 0.0001 ? v_local / radius : vec2(1.0, 0.0);\n"
+    "        float scale = length(normal * u_scale.xy);\n"
+    "        float halfWidth = v_shape.z * scale;\n"
+    "        wanted = halfWidth * 2.0;\n"
+    "        halfWidth = max(halfWidth, 0.5);\n"
+    "        coverage = clamp(halfWidth + 0.5 -\n"
+    "                         abs(radius - v_shape.y) * scale, 0.0, 1.0);\n"
+    "    }\n"
+    "    coverage *= min(1.0, wanted);\n"
+    "    if (coverage <= 0.0)\n"
+    "        discard;\n"
+    "    vec3 colour = texelFetch(u_palette,\n"
+    "        ivec2(int(v_shape.w + 0.5), 0), 0).rgb;\n"
+    "    outputColour = vec4(colour * coverage, coverage);\n"
+    "}\n";
+
+#define GL_RENDERER_HUD_SHAPE_CAPACITY 256
+#define GL_RENDERER_HUD_VERTEX_FLOATS 14
+
 #define GL_RENDERER_TEXT_QUAD_CAPACITY 4096
 #define GL_RENDERER_TEXT_VERTEX_FLOATS 5
 
@@ -548,6 +642,17 @@ typedef struct GlRenderer {
     unsigned char textMouseFree[SDL_PORT_FRAME_WIDTH * SDL_PORT_FRAME_HEIGHT];
     float textVertices[GL_RENDERER_TEXT_QUAD_CAPACITY * 6 *
                        GL_RENDERER_TEXT_VERTEX_FLOATS];
+    /* --fine-hud */
+    GLuint hudProgram;
+    GLuint hudVertexArray;
+    GLuint hudVertexBuffer;
+    GLint hudFrameUniform;
+    GLint hudScaleUniform;
+    GLint hudPaletteUniform;
+    GLint hudMaskUniform;
+    unsigned int hudShapeCount;
+    float hudVertices[GL_RENDERER_HUD_SHAPE_CAPACITY * 6 *
+                      GL_RENDERER_HUD_VERTEX_FLOATS];
     /* The frame being presented, and the one the recorded sprites were
        positioned for: 320x200 unless --aspectless added margins. */
     int frameWidth;
@@ -602,6 +707,7 @@ static void ResetRecordedSprites(void)
 {
     g_renderer.spriteCount = 0;
     g_renderer.shipPointCount = 0;
+    g_renderer.hudShapeCount = 0;
 }
 
 static void ResetSpriteAtlasCache(void)
@@ -816,6 +922,9 @@ static GLuint LinkGlProgram(const GLchar *vertexSource,
         g_renderer.gl.BindAttribLocation(program, 0, "a_shipPosition");
         g_renderer.gl.BindAttribLocation(program, 1, "a_shipColour");
         g_renderer.gl.BindAttribLocation(program, 2, "a_shipBrightness");
+        g_renderer.gl.BindAttribLocation(program, 2, "a_hudShape");
+        g_renderer.gl.BindAttribLocation(program, 3, "a_hudClip");
+        g_renderer.gl.BindAttribLocation(program, 4, "a_hudAxis");
         g_renderer.gl.LinkProgram(program);
         g_renderer.gl.GetProgramiv(program, GL_LINK_STATUS, &status);
         if (status == GL_FALSE) {
@@ -1547,6 +1656,84 @@ static void DrawTtfText(void)
     g_renderer.gl.BindBuffer(GL_ARRAY_BUFFER, g_renderer.vertexBuffer);
 }
 
+/* Sets up the --fine-hud program and buffers on first use. */
+static int PrepareGlHud(void)
+{
+    static const struct {
+        GLint size;
+        size_t offset;
+    } attributes[5] = { { 2, 0 }, { 2, 2 }, { 4, 4 }, { 4, 8 }, { 2, 12 } };
+    GLuint attribute;
+
+    if (g_renderer.hudProgram != 0)
+        return 1;
+    g_renderer.hudProgram = LinkGlProgram(g_hudVertexShaderSource,
+                                          g_hudFragmentShaderSource);
+    if (g_renderer.hudProgram == 0)
+        return 0;
+    g_renderer.hudFrameUniform =
+        g_renderer.gl.GetUniformLocation(g_renderer.hudProgram, "u_frame");
+    g_renderer.hudScaleUniform =
+        g_renderer.gl.GetUniformLocation(g_renderer.hudProgram, "u_scale");
+    g_renderer.hudPaletteUniform =
+        g_renderer.gl.GetUniformLocation(g_renderer.hudProgram, "u_palette");
+    g_renderer.hudMaskUniform =
+        g_renderer.gl.GetUniformLocation(g_renderer.hudProgram, "u_viewMask");
+    g_renderer.gl.GenVertexArrays(1, &g_renderer.hudVertexArray);
+    g_renderer.gl.GenBuffers(1, &g_renderer.hudVertexBuffer);
+    if (g_renderer.hudVertexArray == 0 || g_renderer.hudVertexBuffer == 0) {
+        fprintf(stderr, "OpenGL HUD resources are unavailable.\n");
+        return 0;
+    }
+    g_renderer.gl.BindVertexArray(g_renderer.hudVertexArray);
+    g_renderer.gl.BindBuffer(GL_ARRAY_BUFFER, g_renderer.hudVertexBuffer);
+    for (attribute = 0; attribute < 5; attribute++) {
+        g_renderer.gl.EnableVertexAttribArray(attribute);
+        g_renderer.gl.VertexAttribPointer(
+            attribute, attributes[attribute].size, GL_FLOAT, GL_FALSE,
+            sizeof(float) * GL_RENDERER_HUD_VERTEX_FLOATS,
+            (const void *)(sizeof(float) * attributes[attribute].offset));
+    }
+    g_renderer.gl.BindVertexArray(g_renderer.vertexArray);
+    return 1;
+}
+
+/* Draws the recorded --fine-hud lines and rings over the space layer. */
+static void DrawHudShapes(int viewportWidth, int viewportHeight)
+{
+    if (g_renderer.hudShapeCount == 0 || !PrepareGlHud())
+        return;
+    g_renderer.gl.UseProgram(g_renderer.hudProgram);
+    g_renderer.gl.Uniform4f(g_renderer.hudFrameUniform,
+                            (float)g_renderer.frameWidth,
+                            (float)g_renderer.frameHeight, 0.0f, 0.0f);
+    g_renderer.gl.Uniform4f(
+        g_renderer.hudScaleUniform,
+        (float)viewportWidth / (float)g_renderer.frameWidth,
+        (float)viewportHeight / (float)g_renderer.frameHeight, 0.0f, 0.0f);
+    g_renderer.gl.ActiveTexture(GL_TEXTURE1);
+    g_renderer.gl.BindTexture(GL_TEXTURE_2D, g_renderer.paletteTexture);
+    g_renderer.gl.Uniform1i(g_renderer.hudPaletteUniform, 1);
+    g_renderer.gl.ActiveTexture(GL_TEXTURE3);
+    g_renderer.gl.BindTexture(GL_TEXTURE_2D, g_renderer.maskTexture);
+    g_renderer.gl.Uniform1i(g_renderer.hudMaskUniform, 3);
+    g_renderer.gl.BindVertexArray(g_renderer.hudVertexArray);
+    g_renderer.gl.BindBuffer(GL_ARRAY_BUFFER, g_renderer.hudVertexBuffer);
+    g_renderer.gl.BufferData(
+        GL_ARRAY_BUFFER,
+        (GLsizeiptr)(sizeof(float) * (size_t)g_renderer.hudShapeCount * 6 *
+                     GL_RENDERER_HUD_VERTEX_FLOATS),
+        g_renderer.hudVertices, GL_STREAM_DRAW);
+    g_renderer.gl.Disable(GL_DEPTH_TEST);
+    g_renderer.gl.Enable(GL_BLEND);
+    g_renderer.gl.BlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    g_renderer.gl.DrawArrays(GL_TRIANGLES, 0,
+                             (GLsizei)(g_renderer.hudShapeCount * 6));
+    g_renderer.gl.Disable(GL_BLEND);
+    g_renderer.gl.BindVertexArray(g_renderer.vertexArray);
+    g_renderer.gl.BindBuffer(GL_ARRAY_BUFFER, g_renderer.vertexBuffer);
+}
+
 /* Lays out --ttf-text for a frame about to be presented, taking the
    replaced glyphs' ink out of presentedFrame. */
 static void PrepareTtfTextFrame(const unsigned char *pixels)
@@ -1659,6 +1846,8 @@ static int RenderGlFrame(const unsigned char *pixels,
         DrawRecordedSprites((float)viewportWidth / g_renderer.frameWidth,
                             viewportLeft, viewportBottom, viewportWidth,
                             viewportHeight);
+    if (drawSprites)
+        DrawHudShapes(viewportWidth, viewportHeight);
     DrawTtfText();
     if (SdlCaptureFrameWanted())
         CaptureGlFrame(viewportLeft, viewportBottom, viewportWidth,
@@ -1909,7 +2098,15 @@ void SdlGlRendererShutdown(void)
             g_renderer.gl.DeleteProgram(g_renderer.shipProgram);
         if (g_renderer.textProgram != 0)
             g_renderer.gl.DeleteProgram(g_renderer.textProgram);
+        if (g_renderer.hudProgram != 0)
+            g_renderer.gl.DeleteProgram(g_renderer.hudProgram);
     }
+    if (canDeleteResources && g_renderer.gl.DeleteBuffers != 0 &&
+        g_renderer.hudVertexBuffer != 0)
+        g_renderer.gl.DeleteBuffers(1, &g_renderer.hudVertexBuffer);
+    if (canDeleteResources && g_renderer.gl.DeleteVertexArrays != 0 &&
+        g_renderer.hudVertexArray != 0)
+        g_renderer.gl.DeleteVertexArrays(1, &g_renderer.hudVertexArray);
     if (canDeleteResources && g_renderer.gl.DeleteBuffers != 0 &&
         g_renderer.textVertexBuffer != 0)
         g_renderer.gl.DeleteBuffers(1, &g_renderer.textVertexBuffer);
@@ -2142,6 +2339,91 @@ int SdlGlRendererRecordColourOverlay(const Viewport *viewport,
     static const float unused[3] = { 1.0f, 1.0f, 1.0f };
 
     return RecordShipVertices(viewport, vertices, count, 7, 0.0f, 1, unused);
+}
+
+/* Records one --fine-hud shape about (x, y) in viewport coordinates: a
+ * segment of the given half length along the unit axis, or a ring of that
+ * radius, halfWidth frame pixels either side of its line. */
+static int RecordHudShape(const Viewport *viewport, float x, float y,
+                          float axisX, float axisY, int ring, float size,
+                          float halfWidth, unsigned char colour)
+{
+    /* Room for the antialiased edge and the one-display-pixel minimum. */
+    const float margin = 1.5f;
+    float along;
+    float across;
+    float *out;
+    int vertex;
+
+    if (g_renderer.frameState != GL_RENDERER_FRAME_RECORDING ||
+        viewport == 0 ||
+        g_renderer.hudShapeCount >= GL_RENDERER_HUD_SHAPE_CAPACITY)
+        return 0;
+    along = size + halfWidth + margin;
+    across = (ring ? size : 0.0f) + halfWidth + margin;
+    if (ring) {
+        axisX = 1.0f;
+        axisY = 0.0f;
+    }
+    x += (float)g_renderer.spaceLayerOffsetX;
+    y += (float)g_renderer.spaceLayerOffsetY;
+    out = g_renderer.hudVertices + (size_t)g_renderer.hudShapeCount * 6 *
+                                       GL_RENDERER_HUD_VERTEX_FLOATS;
+    for (vertex = 0; vertex < 6; vertex++) {
+        static const int corners[6] = { 0, 1, 2, 2, 1, 3 };
+        float a = (corners[vertex] & 2) != 0 ? along : -along;
+        float c = (corners[vertex] & 1) != 0 ? across : -across;
+        float localX = a * axisX - c * axisY;
+        float localY = a * axisY + c * axisX;
+
+        out[0] = x + localX;
+        out[1] = y + localY;
+        out[2] = localX;
+        out[3] = localY;
+        out[4] = ring ? 1.0f : 0.0f;
+        out[5] = size;
+        out[6] = halfWidth;
+        out[7] = (float)colour;
+        out[8] = (float)(viewport->left + g_renderer.spaceLayerOffsetX);
+        out[9] = (float)(viewport->top + g_renderer.spaceLayerOffsetY);
+        out[10] = (float)(viewport->right + g_renderer.spaceLayerOffsetX);
+        out[11] = (float)(viewport->bottom + g_renderer.spaceLayerOffsetY);
+        out[12] = axisX;
+        out[13] = axisY;
+        out += GL_RENDERER_HUD_VERTEX_FLOATS;
+    }
+    g_renderer.hudShapeCount++;
+    return 1;
+}
+
+/* Records a --fine-hud line between two points in viewport coordinates,
+ * its ends squared off halfWidth past them. */
+int SdlGlRendererRecordHudLine(const Viewport *viewport, float x0, float y0,
+                               float x1, float y1, float halfWidth,
+                               unsigned char colour)
+{
+    float dx = x1 - x0;
+    float dy = y1 - y0;
+    float length = sqrtf(dx * dx + dy * dy);
+
+    if (length < 0.0001f) {
+        dx = 1.0f;
+        dy = 0.0f;
+    } else {
+        dx /= length;
+        dy /= length;
+    }
+    return RecordHudShape(viewport, (x0 + x1) * 0.5f, (y0 + y1) * 0.5f, dx,
+                          dy, 0, length * 0.5f, halfWidth, colour);
+}
+
+/* Records a --fine-hud ring, round in frame pixels; radius 0 is a dot. */
+int SdlGlRendererRecordHudRing(const Viewport *viewport, float x, float y,
+                               float radius, float halfWidth,
+                               unsigned char colour)
+{
+    return RecordHudShape(viewport, x, y, 1.0f, 0.0f, 1, radius, halfWidth,
+                          colour);
 }
 
 /* --hdr: lets the entry just recorded go gain above standard white. */

@@ -381,8 +381,15 @@ int SdlIsProtectedObjectiveShip(short obj);
 const char *SdlAutopilotWaitReason(void);
 void SdlGunRangeEnable(void);
 int SdlGunRangeActive(void);
-void SdlGunRangeDrawCrosshair(struct Viewport *viewport, short x, short y,
-                              unsigned char *shape);
+void SdlDrawCrosshair(struct Viewport *viewport, short x, short y,
+                      struct Shape *shape);
+void SdlFineHudEnable(void);
+int SdlFineHudActive(void);
+int SdlFineHudDrawMark(const struct Viewport *viewport, float x, float y,
+                       struct Shape *shape, short frame, short colour);
+int SdlFineHudDrawBox(const struct Viewport *viewport, short left, short top,
+                      short right, short bottom, int solid,
+                      unsigned char colour);
 void SdlMouseCurveEnable(int percent);
 int SdlMouseCurveActive(void);
 short SdlMouseCurveStep(short offset, int vertical);

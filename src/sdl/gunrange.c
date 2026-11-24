@@ -57,11 +57,17 @@ static int SdlTargetInGunRange(void)
     return guns > 0;
 }
 
-/* Draws the crosshair sprite for the current range state. */
-void SdlGunRangeDrawCrosshair(struct Viewport *viewport, short x, short y,
-                              unsigned char *shape)
+/* Draws the central crosshair: dark grey while --gun-range finds the
+ * target out of reach, and as --fine-hud lines when they can be drawn. */
+void SdlDrawCrosshair(struct Viewport *viewport, short x, short y,
+                      struct Shape *shape)
 {
-    if (SdlTargetInGunRange())
+    int dark = g_bGunRange && !SdlTargetInGunRange();
+
+    if (SdlFineHudDrawMark(viewport, x, y, shape, 0,
+                           dark ? (short)cDarkGreyColour : (short)-1))
+        return;
+    if (!dark)
         DrawSpriteDefault(viewport, x, y, shape, 0);
     else
         DrawSolidColourSprite(viewport, x, y, shape, 0, cDarkGreyColour);

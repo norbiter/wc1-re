@@ -2180,6 +2180,15 @@ void draw_target_box(unsigned short colour, signed char object,
             aeShipSide[object] == aeShipSide[0]) {
             colour = cBlueColour;
         }
+#ifdef SDL_PORT
+        /* --fine-hud draws the brackets as display-resolution lines; the
+         * erasing pass in the view's clear colour still runs as before. */
+        if ((short)colour != cPrimaryViewBufferColour &&
+            SdlFineHudDrawBox(&stSpaceBufferViewport, bounds.left,
+                              bounds.top, bounds.right, bounds.bottom,
+                              solid, (unsigned char)colour)) {
+        } else
+#endif
         if (solid != 0) {
             DrawViewportBorder(&stSpaceBufferViewport, bounds.left, bounds.top,
                                bounds.right, bounds.bottom, colour);
@@ -2228,6 +2237,11 @@ void draw_target_box(unsigned short colour, signed char object,
                     centerY = (centerY +
                         ((SinFixed(nTargetLockMarkerAngle) *
                           nTargetLockCountdown * 2) >> 8));
+#ifdef SDL_PORT
+                    if (!SdlFineHudDrawMark(&stSpaceBufferViewport, centerX,
+                                            centerY, pTgtLockShapePtr, 1,
+                                            -1))
+#endif
                     DrawSpriteDefault(&stSpaceBufferViewport, centerX, centerY,
                                       pTgtLockShapePtr, 1);
                     nTargetLockMarkerX = centerX;
@@ -2389,7 +2403,7 @@ unsigned int overlay_head_up_display(void)
     }
 
 #ifdef SDL_PORT
-    if (SdlGunRangeActive()) {
+    if (SdlGunRangeActive() || SdlFineHudActive()) {
         short crosshairY = nCurrentViewCenterPosY;
 
         if (bCockpitlessView != 0 && cCurrentCockpitView == 1)
@@ -2397,9 +2411,9 @@ unsigned int overlay_head_up_display(void)
         else if (bCockpitlessView != 0 && cCurrentCockpitView == 3)
             crosshairY = (short)(crosshairY + 14);
         if (bCockpitlessView == 0 || cCurrentCockpitView <= 3)
-            SdlGunRangeDrawCrosshair(&stSpaceBufferViewport,
-                                     nCurrentViewCenterPosX, crosshairY,
-                                     pTgtLockShapePtr);
+            SdlDrawCrosshair(&stSpaceBufferViewport,
+                             nCurrentViewCenterPosX, crosshairY,
+                             pTgtLockShapePtr);
     } else
 #endif
     if (bCockpitlessView != 0) {

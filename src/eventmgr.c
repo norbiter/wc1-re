@@ -1101,7 +1101,12 @@ void draw_sorted_objects_to_buffer(void)
                 if (specialObject == obj) {
                     shape = apObjShapeArray[obj];
 #ifdef SDL_PORT
-                    if (!SdlRecordSpaceSprite(
+                    /* --fine-hud draws the nav pointer as lines. */
+                    if (!SdlFineHudDrawMark(&stSpaceBufferViewport,
+                                            enhancedScreenX, enhancedScreenY,
+                                            shape, asObjectViewFrames[obj],
+                                            -1) &&
+                        !SdlRecordSpaceSprite(
                             &stSpaceBufferViewport, enhancedScreenX,
                             enhancedScreenY, shape,
                             asObjectViewFrames[obj], 0, 0x100, 0))

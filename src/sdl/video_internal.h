@@ -46,6 +46,12 @@ unsigned int SdlGlRendererImageGeneration(void);
 int SdlGlRendererRecordImage(const struct Viewport *viewport, int handle,
                              const float corners[8], const float tint[3]);
 void SdlGlRendererSetLastHdrGain(float gain);
+int SdlGlRendererRecordHudLine(const struct Viewport *viewport, float x0,
+                               float y0, float x1, float y1, float halfWidth,
+                               unsigned char colour);
+int SdlGlRendererRecordHudRing(const struct Viewport *viewport, float x,
+                               float y, float radius, float halfWidth,
+                               unsigned char colour);
 int SdlHdrRequested(void);
 void SdlHdrPrepareWindow(SDL_Window *window);
 void SdlHdrSetSurface(int floatSurface);
