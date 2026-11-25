@@ -203,6 +203,7 @@ void SdlStopRadioVoice(void);
  * diagnostic build defines SDL_PORT_LEGACY_DEBUG_OUTPUT. */
 void SdlOutputDebugString(const char *text);
 void SdlPumpEvents(void);
+void SdlPumpEventsWhileWaiting(void);
 /* Headless capture for automated testing (src/sdl/capture.c). */
 void SdlCaptureInitialize(void);
 void SdlCaptureServiceInput(void);

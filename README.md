@@ -146,9 +146,8 @@ remembers your folder and options.
 ## Fork fixes and features
 
 On top of upstream's improvements, this fork adds the following. It also
-leaves out two of upstream's changes: the hi-res HUD fonts (`--hires-hud` and
-its launcher checkbox), which `--ttf-text` replaces, and upstream's folding of
-held keys' repeats, since the fork repeats every held key itself.
+leaves out one of upstream's changes: the hi-res HUD fonts (`--hires-hud` and
+its launcher checkbox), which `--ttf-text` replaces.
 
 Every feature with a switch also takes `--no-<name>`, and the last of the two
 given wins. Three switches set several at once; a feature named on the command
@@ -167,7 +166,6 @@ line keeps its setting whatever the bundles say:
 
 | Fix or feature | Default / switch |
 | --- | --- |
-| Every held key keeps repeating, so accelerating while using the radio works | always on |
 | Protected transports are no longer blown up for flying through an enemy-held nav point while you're far away (mission 7-1 scored the second transport as lost although it survived) | always on |
 | Autopilot waits ("Drayman Inbound") while a friendly ship you're meant to meet is still due to jump in at the current nav point; the original left it behind, so in mission 7-1 clearing the Jalthi early and autopiloting home scored the second transport as lost | always on |
 | Ship objectives (such as the Fralthi in mission 8-2) are sighted when the ship itself is on screen within range; the original checked whether your wingman was on screen, so with no wingman, or one out of view, the sighting never counted | always on |

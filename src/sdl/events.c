@@ -453,6 +453,41 @@ int SdlHandleSwcEvent(SDL_Window *window, SDL_Event *event, int flight)
     return 0;
 }
 
+/* Windows folds a key's repeats into the WM_KEYDOWN still waiting in the
+ * message queue, raising its repeat count instead of posting another, and
+ * the Kilrathi Saga reads its messages once a game frame, in
+ * PumpWindowMessages. A held arrow thus moved the menus' pointer once a
+ * frame and stopped when released. The port also reads SDL's events while
+ * the game waits out a frame, and queued every repeat: at the menus' 16
+ * frames a second, the backlog kept the pointer moving long after the key
+ * came up (issue #44). So a repeat is queued only as the first since the
+ * game last pumped its messages, or once the key's last key-down was read. */
+static unsigned int g_nSdlGamePumpCount = 1;
+static unsigned int g_anSdlKeyRepeatPump[256];
+static int g_bSdlWaitingPump;
+
+static int SdlKeyDownQueued(int scanCode)
+{
+    const InputEvent *event;
+
+    for (event = pInputEventHead; event != 0; event = event->next) {
+        if (event->type == INPUT_EVENT_KEY_DOWN && event->value == scanCode)
+            return 1;
+    }
+    return 0;
+}
+
+static int SdlFoldKeyRepeat(int scanCode)
+{
+    if (scanCode < 0 || scanCode >= (int)SDL_arraysize(g_anSdlKeyRepeatPump))
+        return 0;
+    if (g_anSdlKeyRepeatPump[scanCode] == g_nSdlGamePumpCount &&
+        SdlKeyDownQueued(scanCode))
+        return 1;
+    g_anSdlKeyRepeatPump[scanCode] = g_nSdlGamePumpCount;
+    return 0;
+}
+
 /* Hands the game one key transition, as WC1's keyboard reads it. */
 static void SdlQueueGameKey(SDL_Scancode key, SDL_Keycode symbol, Uint16 modifiers,
                             int pressed, int repeat)
@@ -471,14 +506,16 @@ static void SdlQueueGameKey(SDL_Scancode key, SDL_Keycode symbol, Uint16 modifie
     if (pressed && scanCode == SCAN_ESCAPE)
         bEscapePressedFlag = 1;
     if (scanCode != SCAN_NONE) {
-        if (bKeyEventQueueEnabled != 0) {
+        if (!pressed || !repeat || !SdlFoldKeyRepeat(scanCode)) {
+            if (bKeyEventQueueEnabled != 0) {
+                QueueInputEvent(pressed ? INPUT_EVENT_KEY_DOWN : INPUT_EVENT_KEY_UP,
+                                0, 0,
+                                (unsigned short)virtualKey, 0, 0, 0);
+            }
             QueueInputEvent(pressed ? INPUT_EVENT_KEY_DOWN : INPUT_EVENT_KEY_UP,
                             0, 0,
-                            (unsigned short)virtualKey, 0, 0, 0);
+                            (unsigned short)scanCode, 0, 0, 0);
         }
-        QueueInputEvent(pressed ? INPUT_EVENT_KEY_DOWN : INPUT_EVENT_KEY_UP,
-                        0, 0,
-                        (unsigned short)scanCode, 0, 0, 0);
         SetInputKeyState(scanCode, pressed);
     }
     if (!pressed) {
@@ -527,47 +564,6 @@ static void SdlRepeatMouseKeys(void)
     }
 }
 
-/* The game acts on one key-down event per step (accelerate, for one), so a
-   held key must keep generating them.  The OS repeats only the most recently
-   pressed key, which made a second key stop the first.  Ignore OS repeats and
-   generate our own for every held key.  Each held physical key records the
-   game key its press became, so rebound keys repeat as what they stand for. */
-#define SDL_KEY_REPEAT_DELAY_MS 400
-#define SDL_KEY_REPEAT_INTERVAL_MS 33
-
-static Uint32 sdlKeyRepeatDue[SDL_NUM_SCANCODES];
-static SDL_Scancode sdlKeyRepeatGameKey[SDL_NUM_SCANCODES];
-
-static int SdlIsRepeatableKey(SDL_Scancode code)
-{
-    return code > SDL_SCANCODE_UNKNOWN && code < SDL_NUM_SCANCODES &&
-        !(code >= SDL_SCANCODE_LCTRL && code <= SDL_SCANCODE_RGUI);
-}
-
-static void SdlServiceKeyRepeats(void)
-{
-    const Uint8 *state;
-    Uint32 now;
-    int code;
-    SDL_Scancode key;
-
-    state = SDL_GetKeyboardState(0);
-    now = SDL_GetTicks();
-    for (code = 0; code < SDL_NUM_SCANCODES; code++) {
-        key = sdlKeyRepeatGameKey[code];
-        if (key == SDL_SCANCODE_UNKNOWN)
-            continue;
-        if (!state[code]) {
-            sdlKeyRepeatGameKey[code] = SDL_SCANCODE_UNKNOWN;
-            continue;
-        }
-        if ((Sint32)(now - sdlKeyRepeatDue[code]) < 0)
-            continue;
-        sdlKeyRepeatDue[code] = now + SDL_KEY_REPEAT_INTERVAL_MS;
-        SdlQueueGameKey(key, SDL_GetKeyFromScancode(key), 0, 1, 1);
-    }
-}
-
 static void (*g_pfnSdlFlightFpsSaver)(int halves);
 
 void SdlSetFlightFpsSaver(void (*saver)(int halves))
@@ -610,22 +606,11 @@ static int SdlHandleKeyboardEvent(const SDL_KeyboardEvent *event)
             g_pfnSdlFlightFpsSaver((int)(fSpaceFlightFrameRate * 2.0f + 0.5f));
         return 0;
     }
-    /* Held keys repeat by SdlServiceKeyRepeats, not by the OS. */
-    if (pressed && event->repeat != 0)
-        return 0;
     /* In flight, rebound keys stand in for the keys the game reads. */
     key = SdlKeymapTranslateKey(event->keysym.scancode, event->keysym.mod, pressed);
     if (key == SDL_SCANCODE_UNKNOWN)
         return 0;
     symbol = key == event->keysym.scancode ? event->keysym.sym : SDL_GetKeyFromScancode(key);
-    if (SdlIsRepeatableKey(event->keysym.scancode)) {
-        /* Escape never repeats: a held Escape that closed the nav map
-           would otherwise go on to pause the flight behind it. */
-        sdlKeyRepeatGameKey[event->keysym.scancode] =
-            pressed && key != SDL_SCANCODE_ESCAPE ? key : SDL_SCANCODE_UNKNOWN;
-        sdlKeyRepeatDue[event->keysym.scancode] =
-            SDL_GetTicks() + SDL_KEY_REPEAT_DELAY_MS;
-    }
     SdlQueueGameKey(key, symbol, event->keysym.mod, pressed, event->repeat);
     return 0;
 }
@@ -741,6 +726,9 @@ void SdlPumpEvents(void)
 {
     SDL_Event event;
 
+    if (!g_bSdlWaitingPump)
+        g_nSdlGamePumpCount++;
+
     /* The SWC host owns its SDL window and event loop. Its calls into WC1's
        player_input consume only the flight events it has already queued. */
     if (SdlSwcFlightActive())
@@ -749,7 +737,6 @@ void SdlPumpEvents(void)
     SdlCaptureServiceInput();
     SdlServiceOriginFxMusic();
     SdlRepeatMouseKeys();
-    SdlServiceKeyRepeats();
     while (SDL_PollEvent(&event)) {
         if (SdlHandleTownsTextInputEvent(&event))
             continue;
@@ -813,4 +800,14 @@ void SdlPumpEvents(void)
             break;
         }
     }
+}
+
+/* ThrottleFrameAndDrawFps reads the host's events while the game waits out
+ * a frame, where the Kilrathi Saga read none; key repeats then fold as
+ * between the game's own pumps. */
+void SdlPumpEventsWhileWaiting(void)
+{
+    g_bSdlWaitingPump = 1;
+    SdlPumpEvents();
+    g_bSdlWaitingPump = 0;
 }
