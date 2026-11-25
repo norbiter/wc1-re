@@ -937,6 +937,11 @@ void InflightComputer(void)
 
         if (bEscapePressedFlag != 0) {
             bEscapePressedFlag = 0;
+#ifdef SDL_PORT
+            /* The loop stops on the flag, leaving Escape's key-down queued.
+             * The original's flight ignored it; the port's pauses on it. */
+            FlushInputEvents();
+#endif
             cCurrentNavPtIdx =
 #ifdef SDL_PORT
                 savedNavPoint;

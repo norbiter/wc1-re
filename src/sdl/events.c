@@ -503,10 +503,12 @@ static void SdlQueueGameKey(SDL_Scancode key, SDL_Keycode symbol, Uint16 modifie
         nSystemKeyDown = pressed ? (unsigned int)virtualKey : 0;
     if (key == SDL_SCANCODE_F1)
         bF1KeyLatch = pressed && repeat == 0;
-    if (pressed && scanCode == SCAN_ESCAPE)
-        bEscapePressedFlag = 1;
     if (scanCode != SCAN_NONE) {
         if (!pressed || !repeat || !SdlFoldKeyRepeat(scanCode)) {
+            /* A folded repeat never reached the Kilrathi Saga's window
+               procedure, so it does not raise the Escape flag either. */
+            if (pressed && scanCode == SCAN_ESCAPE)
+                bEscapePressedFlag = 1;
             if (bKeyEventQueueEnabled != 0) {
                 QueueInputEvent(pressed ? INPUT_EVENT_KEY_DOWN : INPUT_EVENT_KEY_UP,
                                 0, 0,
@@ -564,6 +566,31 @@ static void SdlRepeatMouseKeys(void)
     }
 }
 
+/* Windows waits about half a second (its default keyboard delay) before a
+ * held key repeats; a Mac's default delay is much shorter, so an ordinary
+ * press already repeated: N opened the nav map and went on to cycle its nav
+ * points, and Escape closed the map, then paused and unpaused the flight.
+ * OS repeats sooner than Windows' delay are dropped, and Escape, whose
+ * repeats only ever re-close or re-pause, never repeats. */
+#define SDL_KEY_REPEAT_DELAY_MS 500
+
+static Uint32 g_adwSdlKeyPressTicks[SDL_NUM_SCANCODES];
+
+static int SdlDropEarlyKeyRepeat(const SDL_KeyboardEvent *event)
+{
+    SDL_Scancode code;
+
+    code = event->keysym.scancode;
+    if (code <= SDL_SCANCODE_UNKNOWN || code >= SDL_NUM_SCANCODES)
+        return 0;
+    if (event->repeat == 0) {
+        g_adwSdlKeyPressTicks[code] = SDL_GetTicks();
+        return 0;
+    }
+    return SDL_GetTicks() - g_adwSdlKeyPressTicks[code] <
+        SDL_KEY_REPEAT_DELAY_MS;
+}
+
 static void (*g_pfnSdlFlightFpsSaver)(int halves);
 
 void SdlSetFlightFpsSaver(void (*saver)(int halves))
@@ -606,9 +633,13 @@ static int SdlHandleKeyboardEvent(const SDL_KeyboardEvent *event)
             g_pfnSdlFlightFpsSaver((int)(fSpaceFlightFrameRate * 2.0f + 0.5f));
         return 0;
     }
+    if (pressed && SdlDropEarlyKeyRepeat(event))
+        return 0;
     /* In flight, rebound keys stand in for the keys the game reads. */
     key = SdlKeymapTranslateKey(event->keysym.scancode, event->keysym.mod, pressed);
     if (key == SDL_SCANCODE_UNKNOWN)
+        return 0;
+    if (pressed && event->repeat != 0 && key == SDL_SCANCODE_ESCAPE)
         return 0;
     symbol = key == event->keysym.scancode ? event->keysym.sym : SDL_GetKeyFromScancode(key);
     SdlQueueGameKey(key, symbol, event->keysym.mod, pressed, event->repeat);
