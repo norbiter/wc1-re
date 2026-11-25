@@ -346,33 +346,41 @@ short GameFlow(void)
 retry_mission:
 #endif
     init_mission(flownSeries, flownMission);
+#ifdef SDL_PORT
+    /* The launch draws the cockpit's displays, and RunSpaceFlight redraws
+     * one only when it changes: the hi-res HUD session starts here. */
+    SdlBeginHiResHudFlight();
+#endif
     LaunchPlayerShip();
     flightResult = RunSpaceFlight(-1);
+#ifdef SDL_PORT
+    SdlEndHiResHudFlight();
+#endif
 
     switch (flightResult) {
-    case 1:
+    case ARCADE_STATE_LANDED:
         free_cockpit();
         ShowCarrierLaunchSequence(
             nPlayerCollisionObject);
-        nArcadeState = 0;
+        nArcadeState = ARCADE_STATE_FLYING;
         nPlayerCollisionObject = -1;
         free_3Space();
         flightResult = calculate_damage_level();
         landing(flightResult);
         break;
-    case 2:
+    case ARCADE_STATE_EJECTED:
         ejection_sequence();
         check_stranded();
-        if (nArcadeState == 3)
+        if (nArcadeState == ARCADE_STATE_STRANDED)
             stranded_sequence();
         free_3Space();
 #ifdef SDL_PORT
         if (SdlRetryMission())
             goto retry_mission;
 #endif
-        if (nArcadeState == 3)
+        if (nArcadeState == ARCADE_STATE_STRANDED)
             return 0;
-        nArcadeState = 0;
+        nArcadeState = ARCADE_STATE_FLYING;
         bPlayerEjectedThisMission = 1;
         stCampaignState.promotionScore = MaxShort(
             0, (stCampaignState.promotionScore - 1));
@@ -381,7 +389,7 @@ retry_mission:
             nPendingMedalIndex = 3;
         bOfficeVisitPending = 1;
         break;
-    case 3:
+    case ARCADE_STATE_STRANDED:
         stranded_sequence();
         free_3Space();
 #ifdef SDL_PORT
@@ -389,7 +397,7 @@ retry_mission:
             goto retry_mission;
 #endif
         return 0;
-    case 4:
+    case ARCADE_STATE_DEAD:
         death_sequence();
         free_3Space();
 #ifdef SDL_PORT

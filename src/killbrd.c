@@ -153,10 +153,6 @@ static TitleMenuRegion aRecRoomMenuRegions[] = {
     { 1, 180, 50, 250, 75 },
     { 1, 275, 50, 319, 135 },
     { 1, 0, 100, 120, 190 },
-#ifdef SDL_PORT
-    /* WCDX's poster hotspot; disabled below if TITLE1.VGA is absent. */
-    { 1, 70, 44, 85, 68 },
-#endif
     { -1, 0, 0, 0, 0 }
 };
 #ifdef SDL_PORT
@@ -185,9 +181,6 @@ static char *apszRecRoomMenuLabels[] = {
     NC_("font0", "Check pilot scores"),
     NC_("font0", "Enter barracks"),
     NC_("font0", "Fly training mission"),
-#ifdef SDL_PORT
-    NC_("font0", "Check poster out"),
-#endif
 };
 /* 0x00470510 */
 int bPanRoomTransition = 0;
@@ -374,21 +367,6 @@ short RecRoom(void)
     short region;
     short result;
     int lastChalkboardTick;
-#ifdef SDL_PORT
-    struct Shape *poster;
-    short savedPacketError;
-
-    /* WCDX restores this interaction using TITLE1.VGA section 1. Load it
-     * through the normal packet path (including the shared data patches),
-     * but do not prompt for optional artwork in a base-game installation. */
-    poster = 0;
-    savedPacketError = nPacketError;
-    if (pDiskFileRecords[75].name[0] != '\0' &&
-        pDiskFileRecords[75].name[0] != ' ')
-        poster = PacketLoad(pDiskFileRecords[75].name, 1, 0, 0, 0);
-    nPacketError = savedPacketError;
-    aRecRoomMenuRegions[6].frame = poster != 0 ? 1 : -1;
-#endif
 
     result = 0;
     lastChalkboardTick = 0;
@@ -400,8 +378,8 @@ short RecRoom(void)
     apszRecRoomMenuLabels[2] =
         apszRecRoomBaseLabels[2];
 
-    PreloadMusicTrackHook(30);
-    spacetrack(30, 2, 1);
+    PreloadMusicTrackHook(MUSIC_BAR);
+    spacetrack(MUSIC_BAR, 2, 1);
     FlushInputEvents();
     LoadBriefingData(stCampaignState.currentSeries,
                      stCampaignState.currentMission);
@@ -422,7 +400,7 @@ short RecRoom(void)
         *(ShortRect *)&aRecRoomMenuRegions[0].left;
 
     apRecRoomFigureShapes[0] =
-        FetchDiskPacketRetrying(5, 11, 0);
+        FetchDiskPacketRetrying(DISK_FILE_RECROOM_VGA, 11, 0);
     GetShapeFrameBounds(&aRecRoomMenuRegions[0].left,
                         aRecRoomCharacterOrigins[0].x,
                         aRecRoomCharacterOrigins[0].y,
@@ -474,7 +452,7 @@ short RecRoom(void)
                 .personalityDeathMission[personality] == 0) {
             apRecRoomFigureShapes[1] =
                 FetchDiskPacketRetrying(
-                    5, (personality + 3), 0);
+                    DISK_FILE_RECROOM_VGA, (personality + 3), 0);
             GetShapeFrameBounds(
                 &aRecRoomMenuRegions[1].left,
                 aRecRoomCharacterOrigins[1].x,
@@ -498,7 +476,7 @@ short RecRoom(void)
                 .personalityDeathMission[personality] == 0) {
             apRecRoomFigureShapes[2] =
                 FetchDiskPacketRetrying(
-                    5, (personality + 3), 0);
+                    DISK_FILE_RECROOM_VGA, (personality + 3), 0);
             GetShapeFrameBounds(
                 &aRecRoomMenuRegions[2].left,
                 aRecRoomCharacterOrigins[2].x,
@@ -555,7 +533,7 @@ short RecRoom(void)
     bottomDestination = stRoomScreenViewport;
     SetViewportRect(&bottomDestination, 0, 187, 319, 199);
     pRecRoomBgShape =
-        FetchDiskPacketRetrying(5, 0, 0);
+        FetchDiskPacketRetrying(DISK_FILE_RECROOM_VGA, 0, 0);
     nMenuPointerSpeed = 1;
     bInputModeState = 1;
     stMouseCursorState.viewport = &stRoomDisplayView;
@@ -759,7 +737,7 @@ short RecRoom(void)
                               cBlackColour);
                 pCurrentConversationBackdropShapePtr =
                     FetchDiskPacketRetrying(
-                        5, 1, 0);
+                        DISK_FILE_RECROOM_VGA, 1, 0);
                 SceneDirector(
                     2,
                     apRecRoomSceneDataList[region],
@@ -783,7 +761,7 @@ short RecRoom(void)
                     &stConstellationViewport, -1, 6);
                 pRecRoomBgShape =
                     FetchDiskPacketRetrying(
-                        5, 0, 0);
+                        DISK_FILE_RECROOM_VGA, 0, 0);
                 ClearViewport(&stRoomScreenViewport,
                               cBlackColour);
                 break;
@@ -800,19 +778,6 @@ short RecRoom(void)
             case 5:
                 result = region;
                 break;
-#ifdef SDL_PORT
-            case 6:
-                /* WCDX poster view: keep the room palette, hide the cursor,
-                 * and accept either a key or a click to return to the room. */
-                FlushInputEvents();
-                ClearViewport(&stScreenView, cBlackColour);
-                DrawSpriteDefault(&stScreenView, 0, 0, poster, 0);
-                DIBslam();
-                DIBslamReal();
-                WaitForInputKey();
-                ClearViewport(&stSceneBuffer, cBlackColour);
-                break;
-#endif
             default:
                 refreshRoom = 0;
                 EnterAllocationScope();
@@ -846,14 +811,11 @@ short RecRoom(void)
     ReleasePacketHandle(pRecRoomBgShape);
     ReleaseTextFont(0);
     ReleasePacketHandle(pBriefingPacket);
-#ifdef SDL_PORT
-    ReleasePacketHandle(poster);
-#endif
     ClearViewport(&stScreenView, cBlackColour);
     free_viewport(&stSceneBuffer);
     bEscapePressedFlag = 0;
     StopMusicUnlessSuppressed();
-    ReleaseMusicTrackHook(30);
+    ReleaseMusicTrackHook(MUSIC_BAR);
     return result;
 }
 
@@ -893,8 +855,26 @@ void ShowChalkBoard(void)
     short pilot;
     short rowY;
     short swap;
+#ifdef SDL_PORT
+    PilotRecord jazzAndDoomsday[2];
+    short deathEntry;
+    int sm2;
+#endif
 
     done = 0;
+#ifdef SDL_PORT
+    /* SM2.EXE 0x43a8a1: SM2's chalkboard lists Bossman and Paladin, its
+       roster entries 10 and 9, where Jazz and Doomsday took over WC1's
+       entries 2 and 5 (SdlSetSm2Pilots); those two veterans keep their
+       WC1 records. While it shows, entries 2 and 5 hold them. */
+    sm2 = SdlPlayingSm2();
+    if (sm2) {
+        jazzAndDoomsday[0] = aPilotEntriesList[2];
+        jazzAndDoomsday[1] = aPilotEntriesList[5];
+        aPilotEntriesList[2] = aInitialPilotRecords[2];
+        aPilotEntriesList[5] = aInitialPilotRecords[5];
+    }
+#endif
     for (index = 0; index < 9; index++) {
         for (other = index; other < 9; other++) {
             if (aPilotEntriesList[asChalkBoardPilotOrder[index]].kills * 1000 -
@@ -912,7 +892,7 @@ void ShowChalkBoard(void)
     context.colour = 0;
     context.backgroundColour = 0;
     stChalkBoardDate = *pCurrentCampaignDate;
-    background = FetchDiskPacketRetrying(5, 2, 0);
+    background = FetchDiskPacketRetrying(DISK_FILE_RECROOM_VGA, 2, 0);
     previousContext = pCurTextContext;
     context.viewport = &stModalSrcViewport;
     InitializeTextContextFromFont(&context, 3,
@@ -951,9 +931,23 @@ void ShowChalkBoard(void)
                               10, rowY,
                               _(apszPilotRankNames[aPilotEntriesList[pilot].rank]),
                               pilotName);
+#ifdef SDL_PORT
+            /* There the two veterans' deaths are entries 10 and 9, and
+               Bossman is KIA from series 3. */
+            deathEntry = sm2 && pilot == 2 ? 10 : sm2 && pilot == 5 ? 9 : pilot;
+            if (sm2 && pilot == 2 && stCampaignState.currentSeries >= 3 &&
+                stCampaignState.currentMission >= 0) {
+                DrawFormattedText("%X%Y     %s",
+                                  230, rowY,
+                                  C_("font3", "KIA"));
+            } else if (pilot == 8 ||
+                stCampaignState
+                    .personalityDeathMission[deathEntry] == 0) {
+#else
             if (pilot == 8 ||
                 stCampaignState
                     .personalityDeathMission[pilot] == 0) {
+#endif
                 DrawFormattedText("%X%Y%d%X%d",
                                   230, rowY,
                                   aPilotEntriesList[pilot].missions,
@@ -975,6 +969,12 @@ void ShowChalkBoard(void)
     ClearInputKeyStatePreservingModifiers();
     bInputModeState = savedInputMode;
     FlushInputEvents();
+#ifdef SDL_PORT
+    if (sm2) {
+        aPilotEntriesList[2] = jazzAndDoomsday[0];
+        aPilotEntriesList[5] = jazzAndDoomsday[1];
+    }
+#endif
 }
 
 /* Function start: 0x440800 */

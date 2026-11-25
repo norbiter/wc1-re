@@ -51,8 +51,8 @@
  * uses: each point's shade table takes, at each n.L, the entry nearest in
  * GAME.PAL luminance to albedo * (ambient + diffuse * n.L).  A rock tumbles
  * about that axis at the rate and in the direction its animation steps
- * through the frames, interpolated between frames and across --smooth
- * frames, and every rock slot gets its own fixed attitude and phase so the
+ * through the frames, interpolated between frames and across --smooth's
+ * in-between frames, and every rock slot gets its own fixed attitude and phase so the
  * field does not turn in step. */
 #include "wc1.h"
 
@@ -1106,7 +1106,7 @@ static void ComputeRock3dBasis(short obj, const Ship3dModel *model,
         elapsed = 0;
     else if (elapsed > period - 1)
         elapsed = period - 1;
-    progress = ((float)elapsed + (float)SdlSmoothFraction()) / (float)period;
+    progress = ((float)elapsed + (float)SdlFlightFrameFraction()) / (float)period;
     if (animation != NULL && animation[0] > animation[1])
         progress = -progress;
     angle = ((float)asObjectViewFrames[obj] + progress) * model->rockStep +

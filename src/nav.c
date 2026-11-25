@@ -663,6 +663,12 @@ char *nav_note(short objective)
 {
     char *note;
 
+#ifdef SDL_PORT
+    /* SM1.5's first briefing points its map at a fifth objective, which the
+       mission data emptied (issue #47); the Kilrathi Saga crashes there. */
+    if (objective < 0 || objective >= cMissionObjectiveCountValue)
+        return "";
+#endif
     note = aMissionObjectivesArray[objective].name;
     if (*note == '?')
         note++;
@@ -732,7 +738,7 @@ void BriefingMap_LoadShapes(void)
     short objective;
 
     pNavMapShape =
-        FetchDiskPacketRetrying(8, 2, 0);
+        FetchDiskPacketRetrying(DISK_FILE_COCKPIT_VGA, 2, 0);
     SetScreenClipRect(0, 0, 259, 155);
     if (AllocateViewport(&stSceneBuffer,
                          cBlackColour, 0) == 0)
@@ -854,7 +860,7 @@ void InflightComputer(void)
         EndCommMenu();
     GetScreenUpdateFlag();
     cScreenViewMode = -1;
-    background = FetchDiskPacketRetrying(8, 1, 0);
+    background = FetchDiskPacketRetrying(DISK_FILE_COCKPIT_VGA, 1, 0);
     ClearViewport(&stScreenView, cBlackColour);
     DrawSpriteDefault(&stScreenView, 0, 0, background, 0);
     ReleasePacketHandle(background);

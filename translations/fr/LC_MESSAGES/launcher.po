@@ -144,6 +144,14 @@ msgid "EGA 16-colour dithering"
 msgstr "Tramage EGA 16 couleurs"
 
 msgctxt "LauncherWindow"
+msgid "Hi-res HUD fonts"
+msgstr "Polices du HUD haute résolution"
+
+msgctxt "LauncherWindow"
+msgid "Smooth spaceflight"
+msgstr "Vol spatial fluide"
+
+msgctxt "LauncherWindow"
 msgid "Gameplay"
 msgstr "Jeu"
 
@@ -166,6 +174,26 @@ msgstr "Mode triche"
 msgctxt "LauncherWindow"
 msgid "Invulnerability and no collisions"
 msgstr "Invulnérabilité et aucune collision"
+
+msgctxt "LauncherWindow"
+msgid "Speed"
+msgstr "Vitesse"
+
+msgctxt "LauncherWindow"
+msgid "Normal (20 FPS)"
+msgstr "Normale (20 FPS)"
+
+msgctxt "LauncherWindow"
+msgid "Slow (16 FPS)"
+msgstr "Lente (16 FPS)"
+
+msgctxt "LauncherWindow"
+msgid "Custom ({} FPS)"
+msgstr "Personnalisée ({} FPS)"
+
+msgctxt "LauncherWindow"
+msgid "In flight, [ and ] (the two keys right of P) slow the game down or speed it up."
+msgstr "En vol, [ et ] (les deux touches à droite du P) ralentissent ou accélèrent le jeu."
 
 msgctxt "LauncherWindow"
 msgid "Joystick"
@@ -252,6 +280,10 @@ msgid "Start SM2"
 msgstr "Lancer SM2"
 
 msgctxt "LauncherWindow"
+msgid "Start SM1.5"
+msgstr "Lancer SM1.5"
+
+msgctxt "LauncherWindow"
 msgid "Start SWC"
 msgstr "Lancer SWC"
 
@@ -261,11 +293,11 @@ msgstr "Crédits"
 
 msgctxt "LauncherWindow"
 msgid "Transfer pilot to SM1…"
-msgstr "Transférer le pilote vers SM1…"
+msgstr "Pilote vers SM1…"
 
 msgctxt "LauncherWindow"
 msgid "Transfer pilot to SM2…"
-msgstr "Transférer le pilote vers SM2…"
+msgstr "Pilote vers SM2…"
 
 #: src/sdl/slint/launcher.slint:337
 msgctxt "LauncherWindow"
@@ -1311,6 +1343,10 @@ msgctxt "LauncherWindow"
 msgid "Music"
 msgstr "Musique"
 
+msgctxt "LauncherWindow"
+msgid "Sound"
+msgstr "Effets sonores"
+
 #: src/sdl/slint/launcher.slint:233
 msgctxt "LauncherWindow"
 msgid "MT-32 ROMs…"
@@ -1323,13 +1359,13 @@ msgstr "MT-32 : {}"
 
 #: src/sdl/slint/launcher.slint:257
 msgctxt "LauncherWindow"
-msgid "Choose the folder with your MT-32 or CM-32L ROMs; until then the game plays AdLib music."
-msgstr "Choisissez le dossier de vos ROM MT-32 ou CM-32L ; d’ici là, le jeu joue la musique AdLib."
+msgid "Choose the folder with your MT-32 or CM-32L ROMs; until then the AdLib plays instead."
+msgstr "Choisissez le dossier de vos ROM MT-32 ou CM-32L ; d’ici là, la carte AdLib est utilisée."
 
 #: src/sdl/slint/launcher.slint:258
 msgctxt "LauncherWindow"
-msgid "The game plays AdLib music: {}"
-msgstr "Le jeu joue la musique AdLib : {}"
+msgid "The AdLib plays instead: {}"
+msgstr "La carte AdLib est utilisée : {}"
 
 #: src/sdl/slint/launcher.slint:462
 msgctxt "LauncherWindow"
@@ -1410,6 +1446,10 @@ msgstr "haut et bas"
 msgctxt "ControlsView"
 msgid "SWC keeps the WCAT four-axis layout in the Custom mode."
 msgstr "SWC garde l’affectation WCAT à quatre axes en mode personnalisé."
+
+msgctxt "ControlsView"
+msgid "SWC keeps the WCAT four-axis layout in the Steam Deck mode."
+msgstr "SWC garde l’affectation WCAT à quatre axes en mode Steam Deck."
 
 #: src/sdl/slint/controls.slint:745
 msgctxt "ControlsView"
@@ -1526,12 +1566,244 @@ msgctxt "ControlsView"
 msgid "Reversed: the other way round."
 msgstr "Inversé : dans l’autre sens."
 
-#: src/sdl/slint/controls.slint:972
+#: src/sdl/slint/controls.slint:1330
 msgctxt "ControlsView"
-msgid "Click an input to change it; changes apply when the game starts."
-msgstr "Cliquez sur une commande pour la changer ; les changements s’appliquent au lancement du jeu."
+msgid "Press an input on the controller, or click it, to change it; changes apply when the game starts."
+msgstr "Appuyez sur une commande de la manette, ou cliquez dessus, pour la changer ; les changements s’appliquent au lancement du jeu."
 
 #: src/sdl/slint/controls.slint:798
 msgctxt "ControlsView"
 msgid "To rebind it, choose Custom in Control mode."
 msgstr "Pour la réaffecter, choisissez Personnalisé dans Mode de contrôle."
+
+#: src/sdl/slint/controls.slint:1042
+msgctxt "ControlsView"
+msgid "X axis"
+msgstr "Axe X"
+
+#: src/sdl/slint/controls.slint:1043
+msgctxt "ControlsView"
+msgid "Y axis"
+msgstr "Axe Y"
+
+#: src/sdl/slint/controls.slint:1044
+msgctxt "ControlsView"
+msgid "Z axis"
+msgstr "Axe Z"
+
+#: src/sdl/slint/controls.slint:1045
+msgctxt "ControlsView"
+msgid "X rotation"
+msgstr "Rotation X"
+
+#: src/sdl/slint/controls.slint:1046
+msgctxt "ControlsView"
+msgid "Y rotation"
+msgstr "Rotation Y"
+
+#: src/sdl/slint/controls.slint:1047
+msgctxt "ControlsView"
+msgid "Z rotation"
+msgstr "Rotation Z"
+
+#: src/sdl/slint/controls.slint:1048
+msgctxt "ControlsView"
+msgid "Slider"
+msgstr "Curseur"
+
+#: src/sdl/slint/controls.slint:1049
+msgctxt "ControlsView"
+msgid "Dial"
+msgstr "Cadran"
+
+#: src/sdl/slint/controls.slint:1050
+msgctxt "ControlsView"
+msgid "Wheel"
+msgstr "Molette"
+
+#: src/sdl/slint/controls.slint:1051
+msgctxt "ControlsView"
+msgid "Rudder"
+msgstr "Palonnier"
+
+#: src/sdl/slint/controls.slint:881 src/sdl/slint/controls.slint:1052
+msgctxt "ControlsView"
+msgid "Throttle"
+msgstr "Gaz"
+
+#: src/sdl/slint/controls.slint:1053
+msgctxt "ControlsView"
+msgid "Accelerator"
+msgstr "Accélérateur"
+
+#: src/sdl/slint/controls.slint:1054
+msgctxt "ControlsView"
+msgid "Brake"
+msgstr "Frein"
+
+#: src/sdl/slint/controls.slint:1084 src/sdl/slint/controls.slint:1085
+msgctxt "ControlsView"
+msgid "Axis {}"
+msgstr "Axe {}"
+
+#: src/sdl/slint/controls.slint:1087 src/sdl/slint/controls.slint:1715
+msgctxt "ControlsView"
+msgid "Hat {}"
+msgstr "Chapeau {}"
+
+#: src/sdl/slint/controls.slint:1088
+msgctxt "ControlsView"
+msgid "Button {}"
+msgstr "Bouton {}"
+
+#: src/sdl/slint/controls.slint:1321 src/sdl/slint/controls.slint:1333
+msgctxt "ControlsView"
+msgid "Original joystick: buttons 1 and 2 together fire a missile; double-click button 2 and hold it for the afterburner."
+msgstr "Joystick d’origine : les boutons 1 et 2 ensemble tirent un missile ; double-cliquez sur le bouton 2 et maintenez-le pour la postcombustion."
+
+#: src/sdl/slint/controls.slint:1323
+msgctxt "ControlsView"
+msgid "SWC has no keys for button 11 or for hat 1's up, down and right."
+msgstr "SWC n’a pas de touche pour le bouton 11 ni pour le haut, le bas et la droite du chapeau 1."
+
+#: src/sdl/slint/controls.slint:1326
+msgctxt "ControlsView"
+msgid "In menus, button 1 selects, buttons 2 and 9 go back, button 3 presses Space and hat 1 moves."
+msgstr "Dans les menus, le bouton 1 sélectionne, les boutons 2 et 9 reviennent, le bouton 3 appuie sur Espace et le chapeau 1 déplace."
+
+#: src/sdl/slint/controls.slint:1335
+msgctxt "ControlsView"
+msgid "In the communications display, hat 1's up and down choose, right sends and left closes."
+msgstr "Sur l’écran des communications, le haut et le bas du chapeau 1 choisissent, la droite envoie et la gauche ferme."
+
+#: src/sdl/slint/controls.slint:1337
+msgctxt "ControlsView"
+msgid "Button 4 answers Yes in prompts; button 9 is Escape outside flight."
+msgstr "Le bouton 4 répond Oui aux questions ; le bouton 9 est Échap hors du vol."
+
+#: src/sdl/slint/controls.slint:1665
+msgctxt "ControlsView"
+msgid "Joystick"
+msgstr "Joystick"
+
+#: src/sdl/slint/controls.slint:1666
+msgctxt "ControlsView"
+msgid "{n} button"
+msgid_plural "{n} buttons"
+msgstr[0] "{n} bouton"
+msgstr[1] "{n} boutons"
+
+#: src/sdl/slint/controls.slint:1667
+msgctxt "ControlsView"
+msgid "{n} hat"
+msgid_plural "{n} hats"
+msgstr[0] "{n} chapeau"
+msgstr[1] "{n} chapeaux"
+
+#: src/sdl/slint/controls.slint:1668
+msgctxt "ControlsView"
+msgid "{n} axis"
+msgid_plural "{n} axes"
+msgstr[0] "{n} axe"
+msgstr[1] "{n} axes"
+
+#: src/sdl/slint/controls.slint:1695
+msgctxt "ControlsView"
+msgid "Axes"
+msgstr "Axes"
+
+msgctxt "LauncherWindow"
+msgid "Steam Deck"
+msgstr "Steam Deck"
+
+msgctxt "LauncherWindow"
+msgid "Left: roll + speed · Right: yaw + pitch"
+msgstr "Gauche : roulis + vitesse · Droite : lacet + tangage"
+
+msgctxt "SteamDeckView"
+msgid "Left shoulder buttons"
+msgstr "Boutons L1 / L2"
+
+msgctxt "SteamDeckView"
+msgid "Right shoulder buttons"
+msgstr "Boutons R1 / R2"
+
+msgctxt "SteamDeckView"
+msgid "View"
+msgstr "Vue"
+
+msgctxt "SteamDeckView"
+msgid "Menu"
+msgstr "Menu"
+
+msgctxt "SteamDeckView"
+msgid "Top view"
+msgstr "Vue de dessus"
+
+msgctxt "SteamDeckView"
+msgid "Rear buttons"
+msgstr "Boutons arrière"
+
+msgctxt "SteamDeckView"
+msgid "Right rear / D-pad"
+msgstr "Arrière droits / croix"
+
+msgctxt "SteamDeckView"
+msgid "Left rear / D-pad"
+msgstr "Arrière gauches / croix"
+
+msgctxt "ControlsView"
+msgid "Steam Input: assign L4 to ↑, L5 to ↓, R4 to ← and R5 to →. In communications, ↑/↓ choose, → sends and ← closes. L3/R3 are stick clicks. Y answers Yes; View is Escape outside flight."
+msgstr "Steam Input : affectez L4 à ↑, L5 à ↓, R4 à ← et R5 à →. Sur l’écran des communications, ↑/↓ choisissent, → envoie et ← ferme. L3/R3 sont les clics des manches. Y répond Oui ; Vue fait Échap hors du vol."
+
+msgctxt "SteamDeckView"
+msgid "Left stick"
+msgstr "Manche gauche"
+
+msgctxt "SteamDeckView"
+msgid "Right stick"
+msgstr "Manche droit"
+
+msgctxt "SteamDeckView"
+msgid "D-pad"
+msgstr "Croix directionnelle"
+
+msgctxt "SteamDeckView"
+msgid "Buttons"
+msgstr "Boutons"
+
+msgctxt "LauncherWindow"
+msgid "Source"
+msgstr "Source"
+
+msgctxt "LauncherWindow"
+msgid "Gamepad"
+msgstr "Manette"
+
+msgctxt "ControlSource"
+msgid "Joystick"
+msgstr "Joystick"
+
+msgctxt "ControlsView"
+msgid "View"
+msgstr "Vue"
+
+msgctxt "ControlsView"
+msgid "Click a binding or press its control to change it. Rear buttons mirror the D-pad."
+msgstr "Cliquez sur une affectation ou appuyez sur sa commande pour la changer. Les boutons arrière reprennent la croix."
+
+msgctxt "ControlsView"
+msgid "This device has no gamepad mapping. Choose Joystick to bind its numbered inputs."
+msgstr "Ce périphérique n’a pas de configuration de manette. Choisissez Joystick pour affecter ses entrées numérotées."
+
+msgctxt "ControlsView"
+msgid "Joystick — not connected"
+msgstr "Joystick — non connecté"
+
+msgctxt "ControlsView"
+msgid "Connect a joystick to see its inputs, or edit bindings offline."
+msgstr "Branchez un joystick pour voir ses entrées, ou modifiez les affectations sans lui."
+
+msgctxt "LauncherWindow"
+msgid "Automatic"
+msgstr "Automatique"

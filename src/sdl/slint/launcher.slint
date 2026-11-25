@@ -9,7 +9,7 @@ import {
     TabWidget,
     VerticalBox
 } from "std-widgets.slint";
-import { ControlsView, InputBinding, InputRow, PadControl } from "controls.slint";
+import { ControlsView, InputBinding, InputRow, PadControl, PadDevice } from "controls.slint";
 import { CalibrationView, CalibrationStep, CalibrationMessage, StickView, DeadZoneText } from "calibration.slint";
 export { DeadZoneText, PadControl, CalibrationStep, CalibrationMessage, StickView }
 
@@ -55,26 +55,42 @@ export component LauncherWindow inherits Window {
         : root.towns-data
         ? ["English", "Español", "Japanese (FM Towns)", "Français"]
         : ["English", "Español", "Français"];
-    // The music the game plays (SdlLauncherMusic): a DOS install offers the
-    // AdLib and the MT-32, a Kilrathi Saga install also its digital music.
+    // The music and the sound effects the game plays (SdlLauncherMusic,
+    // SdlLauncherSound), each on its own device: a DOS install offers the
+    // AdLib and the MT-32, a Kilrathi Saga install also its digital ones.
     in property <bool> dos-data: false;
     in property <bool> music-available: false;
     in-out property <int> music-device;
-    // The choice shown for music-device, which depends on the installation.
+    in-out property <int> sound-device;
+    // The choices shown for the devices, which depend on the installation.
     in-out property <int> music-index;
+    in-out property <int> sound-index;
     out property <[string]> music-choices: root.dos-data
         ? [@tr("AdLib"), @tr("Roland MT-32")]
         : [@tr("Digital"), @tr("AdLib"), @tr("Roland MT-32")];
+    out property <bool> mt32-chosen: root.music-device == 2 || root.sound-device == 2;
     in property <bool> mt32-roms-set: false;
     in property <bool> mt32-ready: false;
     // libmt32emu's description of the ROMs, or why they cannot play.
     in property <string> mt32-detail;
     in-out property <bool> enhanced-renderer;
     in-out property <bool> ega-dither;
+    in-out property <bool> hires-hud-fonts;
+    in-out property <bool> frame-interpolation;
     in-out property <bool> cockpitless-view;
     in-out property <bool> cheat-mode;
+    // Spaceflight's frame rate, which the game's speed follows, in half frames
+    // a second (SdlLauncherFlightFps): Normal 40, the Kilrathi Saga's 20 FPS,
+    // or Slow 32. A rate set in flight with [ and ] is offered as Custom.
+    in-out property <int> flight-fps-halves: 40;
+    in property <int> custom-flight-fps-halves: 0;
+    in property <string> custom-flight-fps;
+    out property <[string]> speed-choices: root.custom-flight-fps-halves > 0
+        ? [@tr("Normal (20 FPS)"), @tr("Slow (16 FPS)"), @tr("Custom ({} FPS)", root.custom-flight-fps)]
+        : [@tr("Normal (20 FPS)"), @tr("Slow (16 FPS)")];
     in-out property <bool> joystick-rumble;
     in-out property <int> joystick-mode-index;
+    in-out property <int> joystick-source-index;
     in-out property <int> joystick-axes-index;
     // Percent of travel (src/sdl/joystick_calibration.h).
     in-out property <float> joystick-dead-zone: 22;
@@ -84,6 +100,8 @@ export component LauncherWindow inherits Window {
     in property <bool> swc-demo: false;
     in property <bool> sm1-data: false;
     in property <bool> sm2-data: false;
+    // SM1.5, the fan port of Super Wing Commander's Covert Missions.
+    in property <bool> sm15-data: false;
     in property <bool> swc-credits: false;
     in property <LauncherMessage> status;
     in property <string> status-detail;
@@ -133,6 +151,7 @@ export component LauncherWindow inherits Window {
     callback installation-selected(int);
     callback language-selected(int);
     callback music-selected(int);
+    callback sound-selected(int);
     callback mt32-browse-requested();
     callback launch-requested(int, bool);
     callback credits-requested();
@@ -161,6 +180,7 @@ export component LauncherWindow inherits Window {
     // The Custom joystick mode's bindings (controls.slint); the launcher
     // fills them in when the mode is first chosen.
     in property <[int]> pad-codes;
+    in property <[int]> steam-deck-codes;
     callback pad-code-changed <=> pad-view.pad-code-changed;
     callback pad-reset <=> pad-view.pad-reset;
     callback custom-pad-requested();
@@ -169,6 +189,26 @@ export component LauncherWindow inherits Window {
         if root.joystick-mode-index == 3 {
             root.custom-pad-requested();
         }
+    }
+
+    // The Joystick tab reads the joysticks while it shows (launcher.cpp's
+    // PadSession) and shows the one in pad-slot; a press there opens the
+    // Custom mode's chooser for it.
+    in property <PadDevice> pad-device;
+    in property <[bool]> pad-held;
+    in property <[float]> pad-axis-values;
+    in property <[int]> pad-axis-kinds;
+    in property <[string]> pad-devices: ["", ""];
+    in-out property <int> pad-slot <=> pad-view.pad-slot;
+    callback pad-slot-chosen <=> pad-view.pad-slot-chosen;
+    callback pad-live-changed(bool);
+    callback pad-pressed(int);
+    pad-pressed(control) => {
+        pad-view.press-control(control);
+    }
+    property <bool> pad-live: root.page == 0 && root.settings-tab == 2;
+    changed pad-live => {
+        root.pad-live-changed(root.pad-live);
     }
 
     // The calibration page (calibration.slint); it shares the dead zone.
@@ -297,6 +337,7 @@ export component LauncherWindow inherits Window {
                                             vertical-alignment: center;
                                         }
                                         ComboBox {
+                                            colspan: 2;
                                             horizontal-stretch: 1;
                                             enabled: root.music-available;
                                             model: root.music-choices;
@@ -305,17 +346,29 @@ export component LauncherWindow inherits Window {
                                                 root.music-selected(self.current-index);
                                             }
                                         }
-                                        Button {
-                                            text: @tr("MT-32 ROMs…");
+                                    }
+
+                                    Row {
+                                        Text {
+                                            text: @tr("Sound");
+                                            vertical-alignment: center;
+                                        }
+                                        // The same devices play the effects.
+                                        ComboBox {
+                                            colspan: 2;
+                                            horizontal-stretch: 1;
                                             enabled: root.music-available;
-                                            clicked => {
-                                                root.mt32-browse-requested();
+                                            model: root.music-choices;
+                                            current-index <=> root.sound-index;
+                                            selected(_) => {
+                                                root.sound-selected(self.current-index);
                                             }
                                         }
                                     }
                                 }
 
-                                if root.music-available && root.music-device == 2 : HorizontalLayout {
+                                // The MT-32's ROMs, once the music or the sound effects use it.
+                                if root.music-available && root.mt32-chosen : HorizontalLayout {
                                     spacing: 8px;
                                     vertical-stretch: 0;
 
@@ -323,6 +376,7 @@ export component LauncherWindow inherits Window {
                                         text: root.mt32-ready ? "●" : "!";
                                         color: root.mt32-ready ? #2e7d32 : #b45f06;
                                         font-size: 14px;
+                                        vertical-alignment: center;
                                     }
 
                                     Text {
@@ -330,10 +384,18 @@ export component LauncherWindow inherits Window {
                                         text: root.mt32-ready
                                             ? @tr("MT-32: {}", root.mt32-detail)
                                             : !root.mt32-roms-set
-                                            ? @tr("Choose the folder with your MT-32 or CM-32L ROMs; until then the game plays AdLib music.")
-                                            : @tr("The game plays AdLib music: {}", root.mt32-detail);
+                                            ? @tr("Choose the folder with your MT-32 or CM-32L ROMs; until then the AdLib plays instead.")
+                                            : @tr("The AdLib plays instead: {}", root.mt32-detail);
                                         color: root.mt32-ready ? Palette.foreground : #b45f06;
                                         wrap: word-wrap;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Button {
+                                        text: @tr("MT-32 ROMs…");
+                                        clicked => {
+                                            root.mt32-browse-requested();
+                                        }
                                     }
                                 }
 
@@ -395,6 +457,15 @@ export component LauncherWindow inherits Window {
                                         enabled: !root.swc-demo;
                                         checked <=> root.ega-dither;
                                     }
+
+                                    // Fork: no "Hi-res HUD fonts" box; --ttf-text replaces them.
+
+                                    CheckBox {
+                                        height: 26px;
+                                        text: @tr("Smooth spaceflight");
+                                        enabled: !root.swc-demo;
+                                        checked <=> root.frame-interpolation;
+                                    }
                                 }
                             }
 
@@ -432,6 +503,36 @@ export component LauncherWindow inherits Window {
                                         wrap: word-wrap;
                                         vertical-stretch: 0;
                                     }
+
+                                    HorizontalLayout {
+                                        spacing: 8px;
+
+                                        Text {
+                                            text: @tr("Speed");
+                                            vertical-alignment: center;
+                                        }
+
+                                        ComboBox {
+                                            horizontal-stretch: 1;
+                                            model: root.speed-choices;
+                                            current-index: root.flight-fps-halves == 40 ? 0
+                                                : root.flight-fps-halves == 32 ? 1 : 2;
+                                            selected(_) => {
+                                                root.flight-fps-halves = self.current-index == 0 ? 40
+                                                    : self.current-index == 1 ? 32
+                                                    : root.custom-flight-fps-halves;
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: @tr("In flight, [ and ] (the two keys right of P) slow the game down or speed it up.");
+                                        color: Palette.foreground;
+                                        opacity: 0.65;
+                                        font-size: 12px;
+                                        wrap: word-wrap;
+                                        vertical-stretch: 0;
+                                    }
                                 }
                             }
                         }
@@ -459,14 +560,15 @@ export component LauncherWindow inherits Window {
                                     @tr("Original — two axes / two buttons"),
                                     @tr("WCAT — four buttons / two axes"),
                                     @tr("WCAT — four buttons / four axes"),
-                                    @tr("Custom — your own bindings")
+                                    @tr("Custom — your own bindings"),
+                                    @tr("Steam Deck")
                                 ];
                                 current-index <=> root.joystick-mode-index;
                             }
 
                             Rectangle { width: 6px; }
 
-                            Text {
+                            if root.joystick-mode-index < 3 || root.swc-demo: Text {
                                 text: @tr("Axis layout");
                                 vertical-alignment: center;
                                 color: Palette.foreground;
@@ -474,10 +576,10 @@ export component LauncherWindow inherits Window {
 
                             // WC1's Custom mode binds each axis itself; SWC
                             // reads it as the four-axis layout.
-                            ComboBox {
+                            if root.joystick-mode-index < 3 || root.swc-demo: ComboBox {
                                 horizontal-stretch: 2;
                                 enabled: root.joystick-mode-index == 2
-                                    || (root.joystick-mode-index == 3 && root.swc-demo);
+                                    || (root.joystick-mode-index >= 3 && root.swc-demo);
                                 model: [
                                     @tr("Twin-stick roll"),
                                     @tr("Twin-stick yaw"),
@@ -488,6 +590,24 @@ export component LauncherWindow inherits Window {
                                     @tr("Rudder roll")
                                 ];
                                 current-index <=> root.joystick-axes-index;
+                            }
+                            if root.joystick-mode-index == 3 && !root.swc-demo: Text {
+                                text: @tr("Source");
+                                vertical-alignment: center;
+                                color: Palette.foreground;
+                            }
+                            if root.joystick-mode-index == 3 && !root.swc-demo: ComboBox {
+                                horizontal-stretch: 2;
+                                model: [@tr("Automatic"), @tr("Gamepad"), @tr("Steam Deck"), @tr("ControlSource" => "Joystick")];
+                                current-index <=> root.joystick-source-index;
+                            }
+                            if root.joystick-mode-index == 4 && !root.swc-demo: Text {
+                                horizontal-stretch: 2;
+                                text: @tr("Left: roll + speed · Right: yaw + pitch");
+                                wrap: word-wrap;
+                                vertical-alignment: center;
+                                color: Palette.foreground;
+                                font-size: 12px;
                             }
                         }
 
@@ -548,8 +668,14 @@ export component LauncherWindow inherits Window {
                                 page: 0;
                                 game: root.controls-game;
                                 joystick-mode: root.joystick-mode-index;
+                                joystick-source: root.joystick-source-index;
                                 joystick-axes: root.joystick-axes-index;
-                                pad-codes: root.pad-codes;
+                                pad-codes: root.joystick-mode-index == 4 ? root.steam-deck-codes : root.pad-codes;
+                                pad-device: root.pad-device;
+                                pad-held: root.pad-held;
+                                pad-axis-values: root.pad-axis-values;
+                                pad-axis-kinds: root.pad-axis-kinds;
+                                pad-devices: root.pad-devices;
                                 // Its tooltips name the keys of the keyboard tab.
                                 keyboard-bindings: keys-view.keyboard-bindings;
                             }
@@ -646,6 +772,13 @@ export component LauncherWindow inherits Window {
                     text: @tr("Start SM2");
                     clicked => {
                         root.launch-requested(2, false);
+                    }
+                }
+
+                if root.path-valid && root.sm15-data: Button {
+                    text: @tr("Start SM1.5");
+                    clicked => {
+                        root.launch-requested(3, false);
                     }
                 }
 

@@ -4,6 +4,7 @@
 int nPilotTransferState;
 int nPilotTransferCampaign = 1;
 int nLaunchCampaign;
+int bLaunchSm15;
 
 /* SM2 plays the same whichever release supplied its files; DOS installs
  * take its Kilrathi Saga logical files 80-84 from SdlCompleteDosInstallTable. */
@@ -15,10 +16,12 @@ int SdlPlayingSm2(void)
 /* The DOS SM2.EXE keeps its own saves in CRUSADE.WLD (CreateSaveFile,
  * 147:0308), so a DOS install's SM2 games carry over. WC.EXE and the Kilrathi
  * Saga's executables share SAVEGAME.WLD, where the transfer barracks also
- * finds the WC1 and SM1 pilots that SM2 can take over. */
+ * finds the WC1 and SM1 pilots that SM2 can take over. The launch decides,
+ * as the executable did: the title's Continue reaches the barracks before
+ * any SM2 game sets the campaign (issue #50), and SM1.5 keeps SM2's file. */
 const char *SdlSaveGameFileName(void)
 {
-    return SdlPlayingSm2() && SdlUsingDosData() && nPilotTransferState != 1 ?
+    return nLaunchCampaign == 2 && SdlUsingDosData() && nPilotTransferState != 1 ?
         "CRUSADE.WLD" : "SAVEGAME.WLD";
 }
 

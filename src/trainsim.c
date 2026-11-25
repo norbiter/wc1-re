@@ -882,9 +882,9 @@ void RunTrainSim(void)
     if (proceed != 0) {
         nCannedSceneMode = 0;
         nTrainSimActive = 1;
-        PreloadMusicTrackHook(20);
-        PreloadMusicTrackHook(21);
-        PreloadMusicTrackHook(22);
+        PreloadMusicTrackHook(MUSIC_SIMULATOR);
+        PreloadMusicTrackHook(MUSIC_SIMULATOR_NEXT_WAVE);
+        PreloadMusicTrackHook(MUSIC_SIMULATOR_GAME_OVER);
         ResetStringBuilder(&stHudMessageTextContext);
         savedCampaign = stCampaignState.campaignIndex;
         savedDataSet = nCampaignDataSet;
@@ -895,6 +895,11 @@ void RunTrainSim(void)
             nTrainSimActive = 1;
             FigureArcadeTime();
             init_mission(0, nTrainSimMission);
+#ifdef SDL_PORT
+            /* The cockpit is on screen from Get Ready to the end of the
+             * Victory or Game Over screen, not only in RunSpaceFlight. */
+            SdlBeginHiResHudFlight();
+#endif
             ShowGetReadyScreen();
 
             if (bCampaignStartupMode != 0) {
@@ -912,15 +917,15 @@ void RunTrainSim(void)
                 nArcadeTimeRemaining = 25;
             }
 
-            InvalidateVduMode(0);
-            InvalidateVduMode(1);
+            InvalidateVduMode(VDU_LEFT);
+            InvalidateVduMode(VDU_RIGHT);
             DIBslam();
             DIBslamReal();
             savedFrameState = bKeyEventQueueEnabled;
             bKeyEventQueueEnabled = 1;
             result = RunSpaceFlight(nArcadeWave);
-            if (result != 1) {
-                nArcadeState = 4;
+            if (result != ARCADE_STATE_LANDED) {
+                nArcadeState = ARCADE_STATE_DEAD;
                 ShowGameOverScreen();
                 nTrainSimMission = 4;
             } else {
@@ -930,6 +935,9 @@ void RunTrainSim(void)
                     ShowVictoryScreen();
                 nTrainSimMission++;
             }
+#ifdef SDL_PORT
+            SdlEndHiResHudFlight();
+#endif
             bKeyEventQueueEnabled = savedFrameState;
         }
 
@@ -938,9 +946,9 @@ void RunTrainSim(void)
         free_all_slots();
         free_cockpit();
         free_3Space();
-        ReleaseMusicTrackHook(20);
-        ReleaseMusicTrackHook(21);
-        ReleaseMusicTrackHook(22);
+        ReleaseMusicTrackHook(MUSIC_SIMULATOR);
+        ReleaseMusicTrackHook(MUSIC_SIMULATOR_NEXT_WAVE);
+        ReleaseMusicTrackHook(MUSIC_SIMULATOR_GAME_OVER);
         UpdateTrainSimHighScores(nCurrentArcadeScore);
         ShowTrainSimHighScores();
     }

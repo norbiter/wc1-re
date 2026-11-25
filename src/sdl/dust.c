@@ -11,7 +11,7 @@
  * direction, and the cube of it centred on the eye is drawn.  A mote's place
  * on screen depends on nothing but the eye's position and frame, so there is
  * nothing to spawn or advance, the sim's random sequence is untouched, and
- * the extra frames of --smooth move the dust simply by moving the eye.
+ * the in-between frames of --smooth move the dust simply by moving the eye.
  * Motes fade out towards the edge of the cube, so the repeat is never seen.
  *
  * Motion shows in two ways.  Parallax: near motes cross the view faster than

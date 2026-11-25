@@ -34,8 +34,10 @@ fixes. It does not pursue a byte-identical reconstruction.
 
 - **Never push to upstream.** `origin` is upstream and is fetch-only in practice. If
   this fork is ever published, it goes to a separate fork remote.
-- **Track upstream by rebasing** local branches onto `origin/main`. Keep local
-  changes small and well isolated so rebases stay cheap.
+- **Track upstream by merging** `origin/main` into the fork's branches. The
+  fork is published, so its history must not be rewritten: no rebasing or
+  force-pushing published branches. Keep local changes small and well
+  isolated so merges stay cheap.
 - **Verification is `make modern`** (or `make modern-gui`) building, and the game
   running (`make run-modern`, `make run-modern-dos`). `make verify`, `make compare`,
   `make report`, and `binary-comp` are upstream's reconstruction tooling and are not
@@ -49,7 +51,7 @@ fixes. It does not pursue a byte-identical reconstruction.
   must change, put the change in the `SDL_PORT` arm of an `#ifdef SDL_PORT` /
   `#ifndef SDL_PORT` conditional, and leave the other arm as upstream has it.
 - The "Absolute Rules" and later sections below are upstream's rules for its
-  reconstruction work. They are kept verbatim to avoid rebase conflicts. Do not
+  reconstruction work. They are kept verbatim to avoid merge conflicts. Do not
   apply them to fork work, but do not edit upstream-owned code against them either
   (for example, do not add address comments or rename reconstructed functions
   unless taking an upstream change).

@@ -24,6 +24,10 @@
 
 WIBO = ./wibo
 CC = $(WIBO) compilers/msvc420/bin/CL.EXE
+# The MSVC rules expand $(CC) themselves. When the shell exports CC, as
+# nix-shell does, make would hand this value to every recipe's environment,
+# where CMake and cargo take it for the host compiler (issue #39).
+unexport CC
 LINK = $(WIBO) compilers/msvc420/bin/LINK.EXE
 LIBRARIAN = $(WIBO) compilers/msvc420/bin/LIB.EXE
 
@@ -148,7 +152,8 @@ MODERN_GUI_BUILD_DIR = $(MODERN_OUT_DIR)/slint-gui
 MODERN_GUI_BUILD_TYPE ?= Release
 MODERN_GUI_CMAKE_ARGS ?=
 MODERN_GUI_SRCS = $(wildcard $(MODERN_GUI_SOURCE_DIR)/* translations/*/LC_MESSAGES/*.po \
-	third_party/sc-controller/images/*.svg third_party/sc-controller/images/*/*.svg)
+	third_party/sc-controller/images/*.svg third_party/sc-controller/images/*/*.svg \
+	third_party/steam-deck/*.svg)
 MODERN_EMPTY :=
 MODERN_SPACE := $(MODERN_EMPTY) $(MODERN_EMPTY)
 MODERN_RUN_DIR ?= data/full
@@ -573,6 +578,8 @@ MODERN_GAME_HOST_SRCS = \
 	src/sdl/dos_intro.c \
 	src/sdl/events.c \
 	src/sdl/gl_renderer.c \
+	src/sdl/hires_hud.c \
+	src/sdl/interpolation.c \
 	src/sdl/joystick.c \
 	src/sdl/keymap.c \
 	src/sdl/mt32.c \
@@ -589,7 +596,6 @@ MODERN_GAME_HOST_SRCS = \
 	src/sdl/autopilotwait.c \
 	src/sdl/gunrange.c \
 	src/sdl/inputcurve.c \
-	src/sdl/smooth.c \
 	src/sdl/dust.c \
 	src/sdl/stars.c \
 	src/sdl/backdrop.c \
@@ -655,6 +661,7 @@ MODERN_MUNT_OBJS = $(patsubst %.cpp,$(MODERN_OUT_DIR)/obj/%.o,$(MODERN_MUNT_SRCS
 MODERN_GAME_HOST_OBJS = \
 	$(MODERN_OUT_DIR)/obj/towns_font.o \
 	$(MODERN_OUT_DIR)/obj/ttf_text_font.o \
+	$(MODERN_OUT_DIR)/obj/hires_cockpit_font.o \
 	$(patsubst src/%.c,$(MODERN_OUT_DIR)/obj/%.o,$(MODERN_GAME_HOST_SRCS)) \
 	$(patsubst src/%.cpp,$(MODERN_OUT_DIR)/obj/%.o,$(MODERN_GAME_HOST_CXX_SRCS)) \
 	$(MODERN_YMFM_OBJS) $(MODERN_MUNT_OBJS)
@@ -808,6 +815,16 @@ $(MODERN_OUT_DIR)/ttf_text_font.c: third_party/spacewingleader/space-wing-leader
 	python3 bin/embedTtfTextFont.py $< $@
 
 $(MODERN_OUT_DIR)/obj/ttf_text_font.o: $(MODERN_OUT_DIR)/ttf_text_font.c | modern-check-deps
+	@mkdir -p $(dir $@)
+	$(MODERN_CC) $(MODERN_CFLAGS) $(MODERN_SANITIZER_FLAGS) -c $< -o $@
+
+# The hi-res HUD's double-size cockpit font (CC BY 4.0, see its README.md).
+$(MODERN_OUT_DIR)/hires_cockpit_font.c: third_party/double-resolution-cockpit-font/cockpit-font-2x.bin bin/compileHiResFont.py
+	@mkdir -p $(dir $@)
+	python3 bin/compileHiResFont.py $< $@ --height 12 \
+		--symbol abHiResCockpitFont --size-symbol nHiResCockpitFontSize
+
+$(MODERN_OUT_DIR)/obj/hires_cockpit_font.o: $(MODERN_OUT_DIR)/hires_cockpit_font.c | modern-check-deps
 	@mkdir -p $(dir $@)
 	$(MODERN_CC) $(MODERN_CFLAGS) $(MODERN_SANITIZER_FLAGS) -c $< -o $@
 

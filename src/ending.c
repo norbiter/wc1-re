@@ -159,17 +159,17 @@ unsigned int ShowCampaignVictorySequence(void)
     int planetDepth;
     int projectedY;
 
-    PreloadMusicTrackHook(0x21);
-    spacetrack(0x21, 2, 1);
+    PreloadMusicTrackHook(MUSIC_DEBRIEFING_SUCCESS);
+    spacetrack(MUSIC_DEBRIEFING_SUCCESS, 2, 1);
     InitializeConversationText();
     init_3Space_objects(0);
     nCannedSceneMode = 2;
     bIntroSceneResourcesActive = 0;
     set_up_action_sphere(0x12);
     planetShape =
-        FetchDiskPacketRetrying(9, 3, 0);
+        FetchDiskPacketRetrying(DISK_FILE_TITLE_VGA, 3, 0);
     projectileShape =
-        FetchDiskPacketRetrying(9, 2, 0);
+        FetchDiskPacketRetrying(DISK_FILE_TITLE_VGA, 2, 0);
     CreateCannedSceneObject(&planetObject, -4, 0, 30000,
                             planetShape, 0, 0, 0x50);
     nScriptedViewObject = 1;
@@ -234,6 +234,20 @@ unsigned int ShowCampaignVictorySequence(void)
                         if (projectile->scale < 16) {
                             projectile->scale = -1;
                         } else {
+#ifdef SDL_PORT
+                            /* The ending's scaled shapes are drawn at the
+                             * enhanced renderer's output resolution, as
+                             * the space objects around them are. */
+                            if (!SdlRecordSpaceSprite(
+                                    &stSpaceBufferViewport,
+                                    (short)(projectile->screenX +
+                                            nCurrentViewCenterPosX),
+                                    (short)(projectile->screenY +
+                                            nCurrentViewCenterPosY),
+                                    projectileShape, 1, 0,
+                                    (short)projectile->scale,
+                                    (short)projectile->flip))
+#endif
                             DrawSpriteScaled(
                                 &stSpaceBufferViewport,
                                 (projectile->screenX +
@@ -298,6 +312,12 @@ unsigned int ShowCampaignVictorySequence(void)
 
                 planetScale = 0x40000L / planetDepth;
                 projectedY = verticalOffset / planetDepth;
+#ifdef SDL_PORT
+                if (!SdlRecordSpaceSprite(
+                        &stSpaceBufferViewport, nCurrentViewCenterPosX,
+                        (short)(nCurrentViewCenterPosY + projectedY),
+                        projectileShape, 0, 0, (short)planetScale, 0))
+#endif
                 DrawSpriteScaled(
                     &stSpaceBufferViewport, nCurrentViewCenterPosX,
                     (nCurrentViewCenterPosY + projectedY),
@@ -324,7 +344,7 @@ unsigned int ShowCampaignVictorySequence(void)
     free_3Space();
     if (bEscapePressedFlag != 1) {
         planetShape =
-            FetchDiskPacketRetrying(9, 5, 0);
+            FetchDiskPacketRetrying(DISK_FILE_TITLE_VGA, 5, 0);
         ClearViewport(&stScreenView, cBlackColour);
         animationFrame = 1;
         WaitForVerticalBlankThunk();
@@ -359,7 +379,7 @@ unsigned int ShowCampaignVictorySequence(void)
 
     bEscapePressedFlag = 0;
     StopMusicUnlessSuppressed();
-    ReleaseMusicTrackHook(0x21);
+    ReleaseMusicTrackHook(MUSIC_DEBRIEFING_SUCCESS);
     bScriptedView = 0;
     bIntroSceneResourcesActive = 1;
     nCannedSceneMode = 0;
@@ -387,20 +407,20 @@ unsigned int ShowTigerClawEscapeScene(void)
     int projectedY;
 
     approachStep = 15;
-    PreloadMusicTrackHook(0x22);
-    spacetrack(0x22, 2, 1);
+    PreloadMusicTrackHook(MUSIC_DEBRIEFING_FAILURE);
+    spacetrack(MUSIC_DEBRIEFING_FAILURE, 2, 1);
     init_3Space_objects(stCampaignState.currentSeries);
     nCannedSceneMode = 2;
     bIntroSceneResourcesActive = 0;
     InitializeConversationText();
     set_up_action_sphere(0x13);
     escapeShape =
-        FetchDiskPacketRetrying(9, 2, 0);
+        FetchDiskPacketRetrying(DISK_FILE_TITLE_VGA, 2, 0);
     if (aObjectTypeData[
             OBJECT_TYPE_HYPERSPACE_JUMP_FLASH].shapeSet == 0) {
         aObjectTypeData[
             OBJECT_TYPE_HYPERSPACE_JUMP_FLASH].shapeSet =
-                FetchDiskPacketRetrying(3, 14, 0);
+                FetchDiskPacketRetrying(DISK_FILE_OBJECTS_VGA, 14, 0);
     }
     nScriptedViewObject = 1;
     initialize_scripted_view(asTigerClawEscapeViewScript);
@@ -422,6 +442,14 @@ unsigned int ShowTigerClawEscapeScene(void)
                 frame < 198) {
                 scale = 0x40000L / depth;
                 projectedY = verticalOffset / depth;
+#ifdef SDL_PORT
+                /* At the enhanced renderer's output resolution, as the
+                 * space objects around it are. */
+                if (!SdlRecordSpaceSprite(
+                        &stSpaceBufferViewport, nCurrentViewCenterPosX,
+                        (short)(nCurrentViewCenterPosY + projectedY),
+                        escapeShape, 0, 0, (short)scale, 0))
+#endif
                 DrawSpriteScaled(
                     &stSpaceBufferViewport, nCurrentViewCenterPosX,
                     (nCurrentViewCenterPosY + projectedY),
@@ -493,7 +521,7 @@ unsigned int ShowTigerClawEscapeScene(void)
     ClearViewport(&stCurrentConvTextViewport,
                   cBlackColour);
     StopMusicUnlessSuppressed();
-    ReleaseMusicTrackHook(0x22);
+    ReleaseMusicTrackHook(MUSIC_DEBRIEFING_FAILURE);
     bScriptedView = 0;
     nCannedSceneMode = 0;
     bIntroSceneResourcesActive = 1;
@@ -509,8 +537,8 @@ unsigned int ShowTheEndScreen(short enableFireworks)
 
     activeFireworks = 0;
     SetEventManagerPump(get_player_input);
-    PreloadMusicTrackHook(0x17);
-    spacetrack(0x17, 2, 1);
+    PreloadMusicTrackHook(MUSIC_TITLE);
+    spacetrack(MUSIC_TITLE, 2, 1);
     InitializeConversationViewport();
     ViewMedals();
     ReleaseTextFont(0);
@@ -518,9 +546,9 @@ unsigned int ShowTheEndScreen(short enableFireworks)
     ClearViewport(&stSceneBuffer, cBlackColour);
     InitializeFireworks();
     pFireworkShape =
-        FetchDiskPacketRetrying(9, 0x11, 0);
+        FetchDiskPacketRetrying(DISK_FILE_TITLE_VGA, 0x11, 0);
     pIntroFont =
-        FetchDiskPacketRetrying(9, 1, 0);
+        FetchDiskPacketRetrying(DISK_FILE_TITLE_VGA, 1, 0);
     print_subtitle(&stSceneBuffer, 0x3a, C_("intro", pszTheEnd));
     PanToScreen(&stSceneBuffer, &stScreenView);
     bEscapePressedFlag = 0;
@@ -561,6 +589,6 @@ unsigned int ShowTheEndScreen(short enableFireworks)
     ReleasePacketHandle(pIntroFont);
     ResetScreenClipToFullHeight();
     StopMusicUnlessSuppressed();
-    ReleaseMusicTrackHook(0x17);
+    ReleaseMusicTrackHook(MUSIC_TITLE);
     return 0;
 }

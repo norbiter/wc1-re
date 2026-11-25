@@ -64,26 +64,37 @@ remembers your folder and options.
   transfer a pilot from an existing save with their statistics and awards. Both
   releases play the expansions the same way, following the Kilrathi Saga, but
   SM2's captured Dralthi keeps its DOS disguise: in the stealth missions the
-  Kilrathi ignore it until it fires on them. With DOS data, SM2 keeps its
-  saved games in `GAMEDAT/CRUSADE.WLD`, as the DOS release does, so your DOS
-  SM2 saves carry over.
+  Kilrathi ignore it until it fires on them. SM2's barracks poster can again
+  be clicked for a closer look, as in the DOS release. With DOS data, SM2
+  keeps its saved games in `GAMEDAT/CRUSADE.WLD`, as the DOS release does, so
+  your DOS SM2 saves carry over.
+- **Secret Missions 1.5:** the fans' port of *Super Wing Commander*'s Covert
+  Missions plays on SM2. Put its four files (`CAMP.015`, `MODULE.015`,
+  `BRIEFING.015` and `TITL15.VGA`, from either its DOS or its Kilrathi Saga
+  package) in `GAMEDAT` beside SM2's, and the launcher offers **Start SM1.5**
+  (`--campaign=sm15` on the command line). It shares SM2's saved games, as its
+  patched executable does. Its first briefing plays without the edited
+  `MODULE.015` the Kilrathi Saga needs.
 - **Languages:** choose **Español**, **Français**, or **Japanese (FM Towns)**
   in the launcher's **Language** menu.
 - **German fan translation:** a DOS installation you have patched yourself
   with the German fan translation shows its German text, including the menus
   and cockpit messages it translates in `WC.EXE`. The launcher's **Language**
   menu then shows **German** only, and some artwork may stay in English.
-- **Roland MT-32 music:** the DOS scores can play on an emulated MT-32 or
+- **Music and sound effects:** the launcher's **Music** and **Sound** menus
+  choose each on its own. A *Kilrathi Saga* installation offers its own
+  **Digital** music and effects, or the DOS ones on an **AdLib** or a
+  **Roland MT-32**; a DOS installation offers the AdLib and the MT-32.
+- **Roland MT-32:** the DOS music and effects can play on an emulated MT-32 or
   CM-32L. Put your own control and PCM ROM files in a folder, choose
-  **Roland MT-32** under **Music** in the launcher, and select the folder with
-  **MT-32 ROMs…**. The launcher names the machine it found, preferring the
-  CM-32L. The MT-32 plays the sound effects too, sharing its channels with the
-  music as the original does. A *Kilrathi Saga* installation can instead keep
-  its own digital music or play the AdLib scores, and both keep its digital
-  sound effects. Without usable ROMs the game plays the AdLib music. The
-  command line takes `--music=default|adlib|mt32`,
-  `--mt32-roms=DIR`, `--mt32-model=ID` (such as `mt32_1_07`) and
-  `--mt32-check`, which reports what a ROM folder holds.
+  **Roland MT-32** under **Music** or **Sound** in the launcher, and select the
+  folder with **MT-32 ROMs…**, which appears with it. The launcher names the
+  machine it found, preferring the CM-32L. Music and effects on one MT-32
+  share its channels as the original does. Without usable ROMs the AdLib
+  plays instead. The command line takes `--music=default|adlib|mt32`,
+  `--sound=default|adlib|mt32`, `--mt32-roms=DIR`, `--mt32-model=ID` (such as
+  `mt32_1_07`) and `--mt32-check`, which reports what a ROM folder holds.
+  Without `--sound`, the effects follow MT-32 music onto the MT-32.
 - **FM Towns:** copy `WC.EXP` and the complete `GAMEDAT` folder from your CD
   into a writable folder and select it. For CD music, keep the disc image and
   place its CUE sheet beside `WC.EXP` as `TOWNS.CUE`.
@@ -101,7 +112,8 @@ remembers your folder and options.
 - Resizable window, fullscreen, and aspect-correct 4:3 presentation.
 - Gamepad support, rumble, and alternative joystick layouts, including
   WCAT-style four-button controls and, for WC1, a Custom mode that rebinds
-  every gamepad button, trigger and stick axis.
+  every gamepad button, trigger and stick axis, and a flight stick's buttons,
+  hats and axes, and a Steam Deck preset.
 - An adjustable joystick dead zone (22% by default, as in the original) and a
   launcher page that calibrates WC1's joystick. It writes `GAMEDAT/j.cal` as
   the game's own calibration does, and the game now reads all of that file,
@@ -114,9 +126,18 @@ remembers your folder and options.
   direction, and `Esc` pausing spaceflight.
 - Sound effects balanced against the music and panned with the camera, and
   mouse wheel throttle control.
+- A game speed choice: spaceflight runs as fast as its frame rate, so the
+  launcher's **Speed** offers **Normal** (the *Kilrathi Saga*'s 20 FPS) and
+  **Slow** (16 FPS). In flight, `[` and `]` (the two keys right of `P`) lower
+  and raise the rate in half steps from 8 to 32 FPS, as the *Kilrathi Saga*'s
+  `Alt+N` and `Alt+M` did; the launcher keeps that rate and offers it as
+  **Custom**. The command line takes `--flight-fps=N`.
 - Optional extras: an enhanced renderer that draws ships at full resolution
-  while keeping the original artwork, cockpit, and HUD; EGA colours; the
-  restored startup intro; a cockpitless view; and a cheat mode.
+  while keeping the original artwork, cockpit, and HUD, and can also show the
+  flight HUD's text at double resolution (launcher checkbox or `--hires-hud`):
+  cockpit text in Trov's double-resolution cockpit font, for English, and
+  radio messages in the game's larger 11-pixel font; EGA colours; the restored
+  startup intro; a cockpitless view; and a cheat mode.
 
 | Enhanced renderer | Enhanced cockpit combat |
 | --- | --- |
@@ -124,7 +145,10 @@ remembers your folder and options.
 
 ## Fork fixes and features
 
-On top of upstream's improvements, this fork adds the following.
+On top of upstream's improvements, this fork adds the following. It also
+leaves out two of upstream's changes: the hi-res HUD fonts (`--hires-hud` and
+its launcher checkbox), which `--ttf-text` replaces, and upstream's folding of
+held keys' repeats, since the fork repeats every held key itself.
 
 Every feature with a switch also takes `--no-<name>`, and the last of the two
 given wins. Three switches set several at once; a feature named on the command
@@ -134,8 +158,7 @@ line keeps its setting whatever the bundles say:
   presentation features marked *enhanced* below. Those marked *enhanced,
   models* are turned on only when relit `ship3d/` models are found (in the
   working directory's `ship3d`, or `ship3d` beside or one or two levels above
-  the program). `--smooth` is left off when the display's refresh rate is
-  known and is not a multiple of 60 Hz.
+  the program).
 - `--easier` turns on the difficulty features marked *easier*.
 - `--classic` turns off the features marked *default* and stops `--enhanced`
   turning anything on, leaving the original game apart from the fixes.
@@ -163,7 +186,7 @@ line keeps its setting whatever the bundles say:
 | Joystick curve: the same linear-into-exponential shaping for gamepad and joystick axes, with an 8% dead zone (the extra axes otherwise use a fixed 25%). In the default original mode the game's own calibration still quantises the reshaped stick to its steps and keeps its one-step dead zone. `=PCT` scales sensitivity | `--joystick-curve[=PCT]` |
 | Sturdier escorts: friendly transports and capital ships (Venture, Dilligent, Drayman, Exeter, Tiger's Claw) get double shields, buying time on escort and protection missions before you arrive | *easier*: `--sturdy-friends` |
 | Fewer missiles to dodge: every Kilrathi ship spawns with at most one missile of each type it carries (SWC flight: ammo capped at 1 too), so early engagements are less about baiting out missiles | *easier*: `--low-missile` |
-| Space flight drawn at three times the sim rate (60 fps from the 20 fps tick). The sim, AI and physics keep their tick; two extra frames per tick advance every object along its current velocity and turn rate, and the controls are re-read for each, so the view answers input without added delay. Cockpit and cockpit-less views only; chase and external views, frame skip and the training simulator draw one frame per tick as before. Pacing assumes a 60 Hz display | *enhanced*: `--smooth` |
+| Smooth spaceflight: upstream's frame interpolation, which draws frames between the game's steps at the display's rate while the sim, AI and physics keep their tick. In the fork it is an *enhanced* feature, and its in-between frames also carry the fork's dust, glare, 3D ships and asteroids, and fine shots. `--interpolate` (upstream's name) does the same | *enhanced*: `--smooth` |
 | Fine space dust: the eight dust sprites are replaced by a field of about a thousand small motes that stand still in space around the ship, so they drift past by parallax and stretch into faint streaks along the direction of travel as speed builds. Each mote shimmers and glints at its own pace, as the original's tumbling sprites did. With `--enhanced` they are drawn at output resolution, down to one display pixel wide; without it they are single dimmed pixels in the 320x200 frame. With `--smooth` they move at 60 fps. Purely visual: the original dust slots, hazard fields and explosion sparks are unchanged, and the sim's random sequence is not touched. Not used in Super Wing Commander flight | *enhanced*: `--dust` |
 | Fine stars: with `--enhanced`, the backdrop stars are drawn at output resolution instead of as scaled-up 320x200 crosses. Each is a sharp core in the colour of the original sprite's centre, a soft halo in the colour of its arms, and, for the brighter stars, four thin glare spikes square to the screen that fade towards their tips. Sizes and colours come from each star's own sprite, and the colours follow palette fades. Without `--enhanced`, the original sprites are drawn | *enhanced*: `--fine-stars` |
 | Fine backdrop: with `--enhanced`, the backdrop's planets, suns, nebulae, asteroids and comets are redrawn at output resolution instead of as scaled-up 320x200 sprites. Planets get an exactly drawn limb fitted to the sprite, its colours smoothed out of their dither, a dark night side where the painting stops, and a thin atmosphere on the lit side. Suns, nebulae and comets are treated as light, so their glow fades into the backdrop. Asteroids keep their shape with a clean, smooth outline. The ringed planet is redrawn as a banded sphere inside a tilted ring, with the planet's shadow falling across the ring's far side. Colours follow palette fades. Without `--enhanced`, the original sprites are drawn | *enhanced*: `--fine-backdrop` |
@@ -235,6 +258,7 @@ reconstruction errors.
 | `Cmd+Q` (macOS) | Quit the game |
 | `Ctrl+S` / `Ctrl+M` (spaceflight) | Toggle sound effects / music |
 | `Esc` (spaceflight) | Pause; press any key to resume |
+| `[` / `]` (spaceflight) | Slow the game down / speed it up (the frame rate, 8 to 32 FPS) |
 | Mouse wheel (spaceflight) | Increase or decrease speed |
 | Gamepad RT / LT (spaceflight) | Same as A / B: fire guns / roll and speed (missiles in the WCAT layouts) |
 | Gamepad Start (spaceflight) | Pause or resume |
@@ -247,14 +271,37 @@ binding. Click a key or mouse input to change it, or **+** to add a second one;
 changes apply when the game starts. `Esc`, and Super Wing Commander's menu
 shortcuts and in-flight computer keys, cannot be changed.
 
-In the Joystick tab's **Custom** control mode, click any input on the gamepad
-drawing to rebind it for WC1's spaceflight, and point at a choice to see what
-it does. A button or trigger can take any
-flight key's action, cycle the views, or turn yaw into roll and pitch into
-speed while held. A stick axis or trigger can pitch, yaw, roll or change speed,
-and a stick axis can also set the throttle; any of these can be reversed.
+In the Joystick tab's **Custom** control mode, press an input on the
+controller, or click it on the gamepad drawing, to rebind it for WC1's
+spaceflight, and point at a choice to see what it does. A button or trigger can
+take any flight key's action, cycle the views, or turn yaw into roll and pitch
+into speed while held. A stick axis or trigger can pitch, yaw, roll or change
+speed, and a stick axis can also set the throttle; any of these can be reversed.
 Custom starts from the WCAT four-button, four-axis layout. Menus keep their
 fixed buttons, and Super Wing Commander keeps the WCAT four-axis layout.
+
+The **Steam Deck** control mode (`--joystick-mode=steam-deck`) follows the
+layout shared in [#32](https://github.com/neuromancer/wc1-re/issues/32): roll
+and speed on the left stick, yaw and pitch on the right, and the D-pad on the
+navigation map, damage display, communications and target lock. The Deck's
+rear buttons mirror the D-pad: L4 up, L5 down, R4 left and R5 right; with
+Steam Input, give those directions to the rear buttons in Steam's controller
+layout. A is left free, as WC1 has no jump drive. Super Wing Commander keeps
+the WCAT four-axis layout in this mode too. In Custom, **Source** picks
+**Automatic**, **Gamepad**, **Steam Deck** or **Joystick**: Automatic follows
+the connected device, Gamepad and Steam Deck show editable drawings (the Deck's
+rear buttons share the D-pad's bindings), and Joystick lists numbered inputs
+even for a device SDL knows as a gamepad. Choosing the preset keeps the Custom
+bindings.
+
+A joystick that SDL does not know as a gamepad, such as a flight stick, is
+shown as its axes, hats and buttons by number, each lit while held, with the
+axes named where the system describes them (X axis, Z rotation, slider, rudder
+and so on). Custom rebinds its first 32 buttons, two hats and eight axes, and
+starts with the stick steering, a twist or rudder taking the other turn and its
+throttle lever setting the speed. Elsewhere its buttons stand in for the
+gamepad's: 1 for A, 2 for B, 3 for X, 4 for Y and 9 for Back, with its first
+hat as the D-pad.
 
 As in the original, a mission ends only by landing on the *Tiger's Claw*,
 ejecting, or dying; quit from the barracks menu.
@@ -295,7 +342,9 @@ Special thanks to:
   [ymfm](https://github.com/aaronsgiles/ymfm), which powers the SDL2 port's
   AdLib emulation;
 - the [Munt project](https://github.com/munt/munt), whose libmt32emu
-  (LGPL-2.1 or later) emulates the Roland MT-32 and CM-32L; and
+  (LGPL-2.1 or later) emulates the Roland MT-32 and CM-32L;
+- Trov for the [double-resolution cockpit font](third_party/double-resolution-cockpit-font/README.md)
+  (CC BY 4.0) that the hi-res HUD shows cockpit text in; and
 - DaisenryakuFan for providing very advanced source reconstructions for the DOS
   releases of several *Wing Commander* titles.
 

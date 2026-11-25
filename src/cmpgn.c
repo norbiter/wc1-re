@@ -262,19 +262,19 @@ unsigned int LoadFace(short face)
 #ifdef SDL_PORT
             FetchDiskPacketRetrying(logicalFile, section, 0);
 #else
-            FetchDiskPacketRetrying(6, face, 0);
+            FetchDiskPacketRetrying(DISK_FILE_TALKING_VGA, face, 0);
 #endif
     } else if (pTalkHeadShape == 0)
         pTalkHeadShape =
 #ifdef SDL_PORT
             FetchDiskPacketRetrying(logicalFile, section, 0);
 #else
-            FetchDiskPacketRetrying(6, face, 0);
+            FetchDiskPacketRetrying(DISK_FILE_TALKING_VGA, face, 0);
 #endif
     nTalkingHeadFace = face;
     if (pConvOverlayShapePtr == 0)
         pConvOverlayShapePtr =
-            FetchDiskPacketRetrying(6, 11, 0);
+            FetchDiskPacketRetrying(DISK_FILE_TALKING_VGA, 11, 0);
 #ifdef SDL_PORT
     if (logicalFile == 80) {
         /* SM2.EXE 0x4a5db8/0x4a5dc0: Doomsday and Jazz origins. */
@@ -317,6 +317,9 @@ unsigned int LongTalk(struct Shape *talker, char *text,
      * such as Spirit's while Halcyon introduces her, keeps its own script as
      * without voices; the line still lasts as long as the recording. */
     int lipSync = voiced && !SdlListeningCloseup();
+    /* Once the recording is over, the line waits out its duration, as the
+     * original does once its script is (#45). */
+    int voiceOver = 0;
 #endif
 
     waiting = 0;
@@ -351,8 +354,13 @@ unsigned int LongTalk(struct Shape *talker, char *text,
             return 0;
         }
 #ifdef SDL_PORT
+        if (voiced && voiceOver == 0 && !SdlVoicePlaying()) {
+            voiceOver = 1;
+            waiting = 1;
+            SetFrameTimerPeriodDirect(duration);
+        }
         if (lipSync) {
-            mouthFrame = SdlVoiceMouthFrame(mouthStart, 9);
+            mouthFrame = SdlVoiceMouthFrame(mouthStart, -1);
             nFrameSkipCounter = 1;
         } else
 #endif
@@ -401,10 +409,6 @@ unsigned int LongTalk(struct Shape *talker, char *text,
         }
         if (CheckEscaped() != 0)
             break;
-#ifdef SDL_PORT
-        if (voiced && (mouthFrame == 9 || !lipSync) && !SdlVoicePlaying())
-            return 0;
-#endif
         if (waiting != 0 && (short)IsFrameTickElapsed() != 0)
             return 0;
     }
@@ -477,9 +481,9 @@ unsigned int CloseTalk(struct Shape *talker, short mouthFrame,
 unsigned int Briefing(short series, short mission)
 {
     bEscapePressedFlag = 0;
-    PreloadMusicTrackHook(0x18);
-    PreloadMusicTrackHook(0x19);
-    PreloadMusicTrackHook(0x1a);
+    PreloadMusicTrackHook(MUSIC_BRIEFING);
+    PreloadMusicTrackHook(MUSIC_BRIEFING_ROOM);
+    PreloadMusicTrackHook(MUSIC_SALUTE);
     LoadMissionData(series, mission);
     LoadBriefingData(series, mission);
     if (bEscapePressedFlag == 0) {
@@ -488,9 +492,9 @@ unsigned int Briefing(short series, short mission)
     }
     bEscapePressedFlag = 0;
     ReleasePacketHandle(pBriefingPacket);
-    ReleaseMusicTrackHook(0x18);
-    ReleaseMusicTrackHook(0x19);
-    ReleaseMusicTrackHook(0x1a);
+    ReleaseMusicTrackHook(MUSIC_BRIEFING);
+    ReleaseMusicTrackHook(MUSIC_BRIEFING_ROOM);
+    ReleaseMusicTrackHook(MUSIC_SALUTE);
     return 0;
 }
 
@@ -504,14 +508,14 @@ unsigned int DeBriefing(short series, short mission)
     fullScore = FullMissionScore();
     playerScore = PlayersMissionScore();
     if (fullScore == 0) {
-        PreloadMusicTrackHook(0x21);
-        spacetrack(0x21, 2, 1);
+        PreloadMusicTrackHook(MUSIC_DEBRIEFING_SUCCESS);
+        spacetrack(MUSIC_DEBRIEFING_SUCCESS, 2, 1);
     } else if ((playerScore * 100) / fullScore > 70) {
-        PreloadMusicTrackHook(0x21);
-        spacetrack(0x21, 2, 1);
+        PreloadMusicTrackHook(MUSIC_DEBRIEFING_SUCCESS);
+        spacetrack(MUSIC_DEBRIEFING_SUCCESS, 2, 1);
     } else {
-        PreloadMusicTrackHook(0x22);
-        spacetrack(0x22, 2, 1);
+        PreloadMusicTrackHook(MUSIC_DEBRIEFING_FAILURE);
+        spacetrack(MUSIC_DEBRIEFING_FAILURE, 2, 1);
     }
     LoadMissionData(series, mission);
     InitializeConversationViewport();
@@ -521,7 +525,7 @@ unsigned int DeBriefing(short series, short mission)
     SetTextContext(&stCurrentConvTxtCtx);
     LoadBriefingData(series, mission);
     pCurrentConversationBackdropShapePtr =
-        FetchDiskPacketRetrying(4, 6, 0);
+        FetchDiskPacketRetrying(DISK_FILE_BRIEFING_VGA, 6, 0);
     SceneDirector(1, pDebriefingSceneDataPtr,
                   pDebriefingTxtInfo);
     DIBslam();
@@ -533,8 +537,8 @@ unsigned int DeBriefing(short series, short mission)
     ReleaseTextFont(0);
     ResetScreenClipToFullHeight();
     StopMusicUnlessSuppressed();
-    ReleaseMusicTrackHook(0x21);
-    ReleaseMusicTrackHook(0x22);
+    ReleaseMusicTrackHook(MUSIC_DEBRIEFING_SUCCESS);
+    ReleaseMusicTrackHook(MUSIC_DEBRIEFING_FAILURE);
     return 0;
 }
 
@@ -547,8 +551,8 @@ unsigned int Office(void)
     unsigned char *textData;
 
     bEscapePressedFlag = 0;
-    PreloadMusicTrackHook(0x24);
-    spacetrack(0x24, 2, 1);
+    PreloadMusicTrackHook(MUSIC_OFFICE);
+    spacetrack(MUSIC_OFFICE, 2, 1);
     InitializeConversationViewport();
     InitializeConversationText();
     packet = FetchDiskPacketRetrying(
@@ -558,7 +562,7 @@ unsigned int Office(void)
     sceneData = packet + header->briefingScene;
     textData = packet + header->briefingText;
     pCurrentConversationBackdropShapePtr =
-        FetchDiskPacketRetrying(4, 7, 0);
+        FetchDiskPacketRetrying(DISK_FILE_BRIEFING_VGA, 7, 0);
     SceneDirector(4, sceneData, textData);
     DIBslam();
     DIBslamReal();
@@ -569,7 +573,7 @@ unsigned int Office(void)
     ReleaseTextFont(0);
     ResetScreenClipToFullHeight();
     StopMusicUnlessSuppressed();
-    ReleaseMusicTrackHook(0x24);
+    ReleaseMusicTrackHook(MUSIC_OFFICE);
     return 0;
 }
 
@@ -803,6 +807,14 @@ unsigned int UpdateMap(char *text, short duration)
     WaitForSceneAdvance(duration, 0);
     ClearViewport(&stScreenView, cBlackColour);
     SetTextContext(&stCurrentConvTxtCtx);
+#ifdef SDL_PORT
+    /* The map raised the screen view's top from 24 to 4. DOS restores the
+     * saved view here; the Kilrathi Saga restores it before the map, so
+     * every later shot of the briefing was drawn 20 lines higher (issue
+     * #49). The scene buffer stays as the map left it, freshly allocated:
+     * the saved copy points at the pixels the map freed. */
+    stScreenView = savedScreen;
+#endif
     ClearViewport(&stScreenView, cBlackColour);
     return 0;
 }
@@ -820,6 +832,7 @@ unsigned int CloseLook(struct Shape *shape, short shot,
     short *start;
 #ifdef SDL_PORT
     int voiced = SdlVoicePlaying();
+    int voiceOver = 0;
 #endif
 
     frameDelay = 0;
@@ -833,7 +846,7 @@ unsigned int CloseLook(struct Shape *shape, short shot,
                               szTxtWorkspaceBuffer);
     start = animation;
     nFrameSkipCounter = 1;
-    if (shot == 2 || shot == 11) {
+    if (shot == SCENE_SHOT_PODIUM || shot == SCENE_SHOT_DEBRIEFING_PODIUM) {
         while (
 #ifdef SDL_PORT
                voiced ||
@@ -841,7 +854,8 @@ unsigned int CloseLook(struct Shape *shape, short shot,
                *animation != -1) {
 #ifdef SDL_PORT
             if (voiced) {
-                frame = SdlVoiceMouthFrame(start, 9);
+                voiceOver = !SdlVoicePlaying();
+                frame = SdlVoiceMouthFrame(start, -1);
                 nFrameSkipCounter = 1;
             } else
 #endif
@@ -868,7 +882,7 @@ unsigned int CloseLook(struct Shape *shape, short shot,
             nFrameSkipCounter--;
             if (nFrameSkipCounter < 1) {
                 nFrameSkipCounter = nFrameSkip;
-                if (shot == 11) {
+                if (shot == SCENE_SHOT_DEBRIEFING_PODIUM) {
                     DrawDebriefingLongShot();
                     if (frame > -1)
                         DrawSpriteDefault(
@@ -893,13 +907,15 @@ unsigned int CloseLook(struct Shape *shape, short shot,
             if (finished != 0 && (short)IsFrameTickElapsed() != 0)
                 return 0;
 #ifdef SDL_PORT
-            if (voiced && frame == 9 && !SdlVoicePlaying())
-                return 0;
+            /* The recording is over and the mouth at rest: the line waits
+             * out its duration below, as after the original's script. */
+            if (voiceOver != 0)
+                break;
 #endif
             DIBslam();
             DIBslamReal();
         }
-    } else if (shot == 0) {
+    } else if (shot == SCENE_SHOT_ESTABLISHING) {
         short sceneFrame;
 
         for (sceneFrame = 0; sceneFrame < 22; sceneFrame++) {

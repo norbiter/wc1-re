@@ -50,14 +50,33 @@ void refresh_installations(LauncherWindow &window,
 void set_language(LauncherWindow &window,
                   const std::vector<GameInstallation> &installations, int language);
 
-/* The music choice that shows the device: a DOS install lists only the
- * AdLib and the MT-32. */
-void show_music_device(LauncherWindow &window)
-{
-    const int device = std::clamp(window.get_music_device(), 0, 2);
+static_assert(SDL_LAUNCHER_SOUND_DEFAULT == SDL_LAUNCHER_MUSIC_DEFAULT &&
+                  SDL_LAUNCHER_SOUND_ADLIB == SDL_LAUNCHER_MUSIC_ADLIB &&
+                  SDL_LAUNCHER_SOUND_MT32 == SDL_LAUNCHER_MUSIC_MT32,
+              "the Music and Sound menus share their devices' numbers");
 
-    window.set_music_index(window.get_dos_data() ? (device == SDL_LAUNCHER_MUSIC_MT32 ? 1 : 0)
-                                                 : device);
+/* The Music or Sound choice that shows a device: a DOS install lists only
+ * the AdLib and the MT-32. */
+int audio_choice(const LauncherWindow &window, int device)
+{
+    device = std::clamp(device, 0, 2);
+    return window.get_dos_data() ? (device == SDL_LAUNCHER_MUSIC_MT32 ? 1 : 0) : device;
+}
+
+/* The device a Music or Sound choice selects. A DOS install's AdLib keeps
+ * whichever AdLib choice applies to Kilrathi Saga installs. */
+int chosen_audio_device(const LauncherWindow &window, int index, int current)
+{
+    if (!window.get_dos_data())
+        return std::clamp(index, 0, 2);
+    return index == 1 ? SDL_LAUNCHER_MUSIC_MT32
+        : current == SDL_LAUNCHER_MUSIC_MT32 ? SDL_LAUNCHER_MUSIC_DEFAULT : current;
+}
+
+void show_audio_devices(LauncherWindow &window)
+{
+    window.set_music_index(audio_choice(window, window.get_music_device()));
+    window.set_sound_index(audio_choice(window, window.get_sound_device()));
 }
 
 void refresh_window(LauncherWindow &window,
@@ -72,13 +91,14 @@ void refresh_window(LauncherWindow &window,
     window.set_swc_demo(status.swcDemo);
     window.set_sm1_data(status.sm1);
     window.set_sm2_data(status.sm2);
+    window.set_sm15_data(status.sm15);
     window.set_swc_credits(status.swcCredits);
     window.set_towns_data(status.valid && status.message == LauncherMessage::FmTowns);
     // FM Towns data has its own CD and FM audio, the SWC demo its own music.
     window.set_dos_data(status.valid && status.message == LauncherMessage::Dos);
     window.set_music_available(status.valid && !status.swcDemo &&
                                status.message != LauncherMessage::FmTowns);
-    show_music_device(window);
+    show_audio_devices(window);
     if (!window.get_towns_data() && window.get_language_index() == 2)
         window.set_language_index(0);
     // The German fan translation replaces the text Spanish and French translate.
@@ -518,7 +538,7 @@ std::optional<int> pad_code(const LauncherWindow &window, int control, std::stri
                 return -10 - 2 * index - (reversed ? 1 : 0);
         }
     }
-    if (control >= SDL_PAD_BUTTONS)
+    if (!SdlPadControlTakesButton(control))
         return std::nullopt;
     if (function == "cycle-views")
         return -2;
@@ -536,16 +556,16 @@ std::optional<int> pad_code(const LauncherWindow &window, int control, std::stri
 
 std::string pad_function(const LauncherWindow &window, int control, int code)
 {
-    if (code == -2 && control < SDL_PAD_BUTTONS)
+    if (code == -2 && SdlPadControlTakesButton(control))
         return "cycle-views";
-    if (code == -3 && control < SDL_PAD_BUTTONS)
+    if (code == -3 && SdlPadControlTakesButton(control))
         return "roll-and-speed";
     if (code <= -10 && code > -10 - 2 * SDL_PAD_AXIS_FUNCTIONS && SdlPadControlTakesAxis(control)) {
         const int offset = -10 - code;
         return std::string(offset % 2 != 0 ? "-" : "") + g_apszSdlPadAxisFunctions[offset / 2];
     }
     const auto rows = window.get_keyboard_rows();
-    if (code >= 0 && control < SDL_PAD_BUTTONS && static_cast<size_t>(code) < rows->row_count()) {
+    if (code >= 0 && SdlPadControlTakesButton(control) && static_cast<size_t>(code) < rows->row_count()) {
         if (const auto data = rows->row_data(code))
             return std::string(std::string_view(data->id));
     }
@@ -554,12 +574,77 @@ std::string pad_function(const LauncherWindow &window, int control, int code)
 
 /* The defaults for an axis layout, with the saved "control=function" lines
    over them. */
+/* A raw joystick's axes by what they are: the stick's X turns as the axis
+   layout's left stick does and its Y pitches, a twist or rudder takes the
+   other turn, and the first throttle lever, or else Z, the throttle. Each is
+   reversed where its pair reads it the other way: the first of a pair grows
+   to the right, the second upwards (src/sdl/pad_bindings.h), and a lever is
+   taken to be forward at SDL's negative end. */
+std::vector<std::string> named_axis_functions(const std::vector<AxisKind> &kinds, int axes)
+{
+    const bool leftRolls = axes == 1 || axes == 2 || axes == 5;
+    const auto lever = [](AxisKind kind) {
+        return kind == AxisKind::Throttle || kind == AxisKind::Slider || kind == AxisKind::Dial ||
+               kind == AxisKind::Accelerator;
+    };
+    const bool hasLever = std::any_of(kinds.begin(), kinds.end(), lever);
+    std::vector<std::string> functions(kinds.size());
+    bool stickX = false;
+    bool stickY = false;
+    bool twist = false;
+    bool throttle = false;
+
+    for (size_t axis = 0; axis < kinds.size(); ++axis) {
+        const AxisKind kind = kinds[axis];
+        std::string function;
+        bool upwards = false;
+        if (kind == AxisKind::X && !stickX) {
+            function = leftRolls ? "roll" : "yaw";
+            stickX = true;
+        } else if (kind == AxisKind::Y && !stickY) {
+            function = "pitch";
+            upwards = true;
+            stickY = true;
+        } else if ((kind == AxisKind::RotationZ || kind == AxisKind::Rudder || kind == AxisKind::Wheel) && !twist) {
+            function = leftRolls ? "yaw" : "roll";
+            twist = true;
+        } else if ((lever(kind) || (kind == AxisKind::Z && !hasLever)) && !throttle) {
+            function = "throttle";
+            upwards = true;
+            throttle = true;
+        }
+        if (!function.empty() && upwards != ((axis & 1) != 0))
+            function = "-" + function;
+        functions[axis] = function;
+    }
+    return functions;
+}
+
 std::shared_ptr<slint::VectorModel<int>> pad_codes(const LauncherWindow &window, int axes,
                                                    std::string_view saved)
 {
     std::vector<int> codes(SDL_PAD_CONTROLS);
-    for (int control = 0; control < SDL_PAD_CONTROLS; ++control)
-        codes[control] = pad_code(window, control, SdlDefaultPadFunction(control, axes)).value_or(-1);
+    std::vector<std::string> named;
+    /* A raw joystick on the tab whose axes the platform names starts with
+       them by what they are. */
+    const auto device = window.get_pad_device();
+    const auto kinds = window.get_pad_axis_kinds();
+    if (device.connected && !device.mapped && kinds && kinds->row_count() > 0) {
+        std::vector<AxisKind> list;
+        for (size_t axis = 0; axis < kinds->row_count(); ++axis)
+            list.push_back(static_cast<AxisKind>(kinds->row_data(axis).value_or(0)));
+        named = named_axis_functions(list, axes);
+    }
+    for (int control = 0; control < SDL_PAD_CONTROLS; ++control) {
+        const size_t axis = static_cast<size_t>(control - SDL_PAD_STICK_AXIS);
+        const std::string function = control < SDL_PAD_GAMEPAD_CONTROLS &&
+                window.get_joystick_source_index() == SDL_PAD_SOURCE_STEAM_DECK
+            ? SdlSteamDeckPadFunction(control)
+            : control >= SDL_PAD_STICK_AXIS && !named.empty()
+            ? (axis < named.size() ? named[axis] : std::string())
+            : SdlDefaultPadFunction(control, axes);
+        codes[control] = pad_code(window, control, function).value_or(-1);
+    }
     while (!saved.empty()) {
         const auto end = saved.find('\n');
         const auto line = saved.substr(0, end);
@@ -585,6 +670,10 @@ std::shared_ptr<slint::VectorModel<int>> pad_codes(const LauncherWindow &window,
 void prepare_pad(const slint::ComponentHandle<LauncherWindow> &window, std::string_view saved, bool &kept)
 {
     window->set_pad_codes(pad_codes(*window, window->get_joystick_axes_index(), saved));
+    std::vector<int> deck(SDL_PAD_GAMEPAD_CONTROLS);
+    for (int control = 0; control < SDL_PAD_GAMEPAD_CONTROLS; ++control)
+        deck[control] = pad_code(*window, control, SdlSteamDeckPadFunction(control)).value_or(-1);
+    window->set_steam_deck_codes(std::make_shared<slint::VectorModel<int>>(std::move(deck)));
     window->on_custom_pad_requested([self = slint::ComponentWeakHandle<LauncherWindow>(window), &kept]() {
         const auto launcher = self.lock();
         if (!launcher || kept)
@@ -601,8 +690,19 @@ void prepare_pad(const slint::ComponentHandle<LauncherWindow> &window, std::stri
             codes->set_row_data(control, code);
     });
     window->on_pad_reset([self = slint::ComponentWeakHandle<LauncherWindow>(window)]() {
-        if (const auto launcher = self.lock())
-            (*launcher)->set_pad_codes(pad_codes(**launcher, (*launcher)->get_joystick_axes_index(), {}));
+        if (const auto launcher = self.lock()) {
+            const auto defaults = pad_codes(**launcher, (*launcher)->get_joystick_axes_index(), {});
+            const auto codes = std::dynamic_pointer_cast<slint::VectorModel<int>>((*launcher)->get_pad_codes());
+            const int source = (*launcher)->get_joystick_source_index();
+            const auto device = (*launcher)->get_pad_device();
+            const bool raw = source == SDL_PAD_SOURCE_JOYSTICK ||
+                (source == SDL_PAD_SOURCE_AUTO && device.connected && !device.mapped);
+            if (codes) {
+                for (int control = raw ? SDL_PAD_GAMEPAD_CONTROLS : 0;
+                     control < (raw ? SDL_PAD_CONTROLS : SDL_PAD_GAMEPAD_CONTROLS); ++control)
+                    codes->set_row_data(control, defaults->row_data(control).value_or(-1));
+            }
+        }
     });
 }
 
@@ -704,6 +804,8 @@ public:
         stored = path.empty() ? std::nullopt : read_joystick_calibration(path);
         window->set_calibration_step(CalibrationStep::Idle);
         window->set_calibration_message(CalibrationMessage::None);
+        joysticks.use_raw(window->get_joystick_mode_index() == SDL_LAUNCHER_JOYSTICK_CUSTOM &&
+            window->get_joystick_source_index() == SDL_PAD_SOURCE_JOYSTICK);
         if (stored && (*stored)[0] < 2)
             window->set_calibration_device((*stored)[0]);
         if (!joysticks.start()) {
@@ -886,7 +988,142 @@ private:
     }
 };
 
+/* The Joystick tab's live view. While the tab shows, the joysticks are read
+   about thirty times a second, and the tab shows the one in pad-slot, or the
+   other when only that is connected. A button, trigger or hat direction
+   pressed since the last reading goes to the Custom mode's chooser. */
+class PadSession {
+public:
+    explicit PadSession(const slint::ComponentHandle<LauncherWindow> &launcher)
+        : window(launcher)
+    {
+        window->on_pad_slot_chosen([this](int) {
+            if (shown)
+                tick();
+        });
+    }
+
+    void show()
+    {
+        if (shown)
+            return;
+        shown = true;
+        joysticks.start();
+        previous = {};
+        tick();
+        timer.start(slint::TimerMode::Repeated, std::chrono::milliseconds(33), [this]() { tick(); });
+    }
+
+    void hide()
+    {
+        if (!shown)
+            return;
+        shown = false;
+        timer.stop();
+        joysticks.stop();
+        previous = {};
+        shownNames = {};
+        publish({});
+        window->set_pad_devices(std::make_shared<slint::VectorModel<slint::SharedString>>(
+            std::vector<slint::SharedString> {"", ""}));
+    }
+
+private:
+    void tick()
+    {
+        joysticks.use_raw(window->get_joystick_mode_index() == SDL_LAUNCHER_JOYSTICK_CUSTOM &&
+            window->get_joystick_source_index() == SDL_PAD_SOURCE_JOYSTICK);
+        joysticks.update();
+        const auto names = joysticks.names();
+        if (names != shownNames) {
+            shownNames = names;
+            window->set_pad_devices(std::make_shared<slint::VectorModel<slint::SharedString>>(
+                std::vector<slint::SharedString> {slint::SharedString(names[0]), slint::SharedString(names[1])}));
+        }
+        int slot = std::clamp(window->get_pad_slot(), 0, 1);
+        if (names[slot].empty() && !names[1 - slot].empty()) {
+            slot = 1 - slot;
+            window->set_pad_slot(slot);
+        }
+        const PadSnapshot next = joysticks.snapshot(slot,
+            window->get_joystick_mode_index() == SDL_LAUNCHER_JOYSTICK_STEAM_DECK ||
+            (window->get_joystick_mode_index() == SDL_LAUNCHER_JOYSTICK_CUSTOM &&
+             window->get_joystick_source_index() == SDL_PAD_SOURCE_STEAM_DECK));
+        const bool sameDevice = next.connected && previous.connected && slot == previousSlot &&
+                                next.mapped == previous.mapped && next.name == previous.name;
+        publish(next);
+        const PadSnapshot earlier = previous;
+        previous = next;
+        previousSlot = slot;
+        if (!sameDevice)
+            return;
+        for (int control = 0; control < SDL_PAD_CONTROLS; ++control) {
+            if (SdlPadControlTakesButton(control) && next.held[control] && !earlier.held[control]) {
+                window->invoke_pad_pressed(control);
+                break;
+            }
+        }
+    }
+
+    // Hands the tab what changed.
+    void publish(const PadSnapshot &next)
+    {
+        PadDevice device;
+        device.connected = next.connected;
+        device.mapped = next.mapped;
+        device.joystick = next.joystick;
+        device.name = slint::SharedString(next.name);
+        device.buttons = next.buttons;
+        device.hats = next.hats;
+        device.axes = next.axes;
+        if (!(device == shownDevice)) {
+            shownDevice = device;
+            std::vector<int> kinds;
+            for (const auto kind : next.axisKinds)
+                kinds.push_back(static_cast<int>(kind));
+            window->set_pad_axis_kinds(std::make_shared<slint::VectorModel<int>>(std::move(kinds)));
+            window->set_pad_device(device);
+        }
+        if (next.held != shownHeld || !heldModel) {
+            shownHeld = next.held;
+            heldModel = std::make_shared<slint::VectorModel<bool>>(
+                std::vector<bool>(shownHeld.begin(), shownHeld.end()));
+            window->set_pad_held(heldModel);
+        }
+        bool moved = !valuesModel;
+        for (size_t axis = 0; axis < next.axisValues.size(); ++axis)
+            moved = moved || std::fabs(next.axisValues[axis] - shownValues[axis]) >= 0.01f;
+        if (moved) {
+            shownValues = next.axisValues;
+            valuesModel = std::make_shared<slint::VectorModel<float>>(
+                std::vector<float>(shownValues.begin(), shownValues.end()));
+            window->set_pad_axis_values(valuesModel);
+        }
+    }
+
+    slint::ComponentHandle<LauncherWindow> window;
+    JoystickReader joysticks;
+    slint::Timer timer;
+    bool shown = false;
+    PadSnapshot previous;
+    int previousSlot = 0;
+    std::array<std::string, 2> shownNames;
+    PadDevice shownDevice;
+    std::array<bool, SDL_PAD_CONTROLS> shownHeld {};
+    std::array<float, SDL_PAD_STICK_AXES> shownValues {};
+    std::shared_ptr<slint::VectorModel<bool>> heldModel;
+    std::shared_ptr<slint::VectorModel<float>> valuesModel;
+};
+
 } // namespace
+
+void SdlSaveLauncherFlightFps(int halves)
+{
+    const auto configPath = launcher_config_path();
+
+    if (!configPath.empty())
+        save_launcher_flight_fps(configPath, halves);
+}
 
 int SdlRunLauncherGui(SdlLauncherOptions *options)
 {
@@ -901,6 +1138,7 @@ int SdlRunLauncherGui(SdlLauncherOptions *options)
         options->autosave = 1;
     const auto configPath = launcher_config_path();
     load_launcher_config(configPath, *options);
+    SdlResolveLauncherSound(options);
     auto installations = discover_game_installations();
 
     std::string initialDirectory(options->gameDirectory);
@@ -924,11 +1162,23 @@ int SdlRunLauncherGui(SdlLauncherOptions *options)
 #endif
     // The keyboard and mouse tab takes the saved bindings when it first opens.
     bool controlsReady = false;
-    // The calibration page reads joysticks only while it shows.
+    // The calibration page and the Joystick tab read joysticks only while
+    // they show; the game opens its own.
     std::unique_ptr<CalibrationSession> calibration;
     const auto stop_calibration = [&calibration]() {
         if (calibration)
             calibration->hide();
+    };
+    PadSession pad(window);
+    window->on_pad_live_changed([&pad](bool live) {
+        if (live)
+            pad.show();
+        else
+            pad.hide();
+    });
+    const auto stop_joysticks = [&pad, stop_calibration]() {
+        stop_calibration();
+        pad.hide();
     };
     accepted = false;
     pickerInitialized = false;
@@ -939,10 +1189,13 @@ int SdlRunLauncherGui(SdlLauncherOptions *options)
     window->set_autosave(options->autosave != 0);
     window->set_enhanced_renderer(options->enhancedRenderer != 0);
     window->set_ega_dither(options->egaDither != 0);
+    window->set_hires_hud_fonts(options->hiResHudFonts != 0);
+    window->set_frame_interpolation(options->frameInterpolation != 0);
     window->set_cockpitless_view(options->cockpitlessView != 0);
     window->set_cheat_mode(options->cheatMode != 0);
     window->set_joystick_rumble(options->joystickRumble != 0);
     window->set_joystick_mode_index(options->joystickMode);
+    window->set_joystick_source_index(options->joystickSource);
     window->set_joystick_axes_index(options->joystickAxes);
     window->set_joystick_dead_zone(static_cast<float>(options->joystickDeadZone));
     bool padBindingsKept = options->padBindings[0] != '\0' ||
@@ -951,21 +1204,27 @@ int SdlRunLauncherGui(SdlLauncherOptions *options)
     refresh_window(*window, installations);
     set_language(*window, installations, options->language);
     window->set_music_device(std::clamp(options->musicDevice, 0, 2));
-    show_music_device(*window);
+    window->set_sound_device(std::clamp(options->soundDevice, 0, 2));
+    /* A rate set in flight with [ and ] that is neither choice shows as
+       Custom. */
+    window->set_flight_fps_halves(options->flightFpsHalves);
+    if (options->flightFpsHalves != SDL_LAUNCHER_FLIGHT_FPS_NORMAL &&
+        options->flightFpsHalves != SDL_LAUNCHER_FLIGHT_FPS_SLOW) {
+        window->set_custom_flight_fps_halves(options->flightFpsHalves);
+        window->set_custom_flight_fps(
+            slint::SharedString(flight_fps_text(options->flightFpsHalves)));
+    }
+    show_audio_devices(*window);
     std::string mt32Roms(options->mt32Roms);
     const std::string mt32Model(options->mt32Model);
     refresh_mt32_roms(*window, mt32Roms, mt32Model);
     window->on_music_selected([&window](int index) {
-        int device = std::clamp(index, 0, 2);
-
-        /* A DOS install lists only the AdLib and the MT-32; its AdLib
-         * keeps whichever AdLib choice applies to Kilrathi Saga installs. */
-        if (window->get_dos_data())
-            device = index == 1 ? SDL_LAUNCHER_MUSIC_MT32
-                : window->get_music_device() == SDL_LAUNCHER_MUSIC_MT32
-                ? SDL_LAUNCHER_MUSIC_DEFAULT : window->get_music_device();
-        window->set_music_device(device);
-        show_music_device(*window);
+        window->set_music_device(chosen_audio_device(*window, index, window->get_music_device()));
+        show_audio_devices(*window);
+    });
+    window->on_sound_selected([&window](int index) {
+        window->set_sound_device(chosen_audio_device(*window, index, window->get_sound_device()));
+        show_audio_devices(*window);
     });
 
     window->on_language_selected([&window, &installations](int language) {
@@ -990,16 +1249,18 @@ int SdlRunLauncherGui(SdlLauncherOptions *options)
         calibration->show(path_from_utf8(std::string(window->get_game_directory())));
     });
     window->on_calibration_closed(stop_calibration);
-    window->window().on_close_requested([stop_calibration]() {
-        stop_calibration();
+    window->window().on_close_requested([stop_joysticks]() {
+        stop_joysticks();
         return slint::CloseRequestResponse::HideWindow;
     });
-    const auto launch = [&window, &accepted, &installations, &controlsReady, options, stop_calibration](
+    const auto launch = [&window, &accepted, &installations, &controlsReady, options, stop_joysticks](
                             int campaign, bool transfer, bool credits) {
         refresh_window(*window, installations);
-        if (!window->get_path_valid() || campaign < 0 || campaign > 2 || (transfer && !campaign) ||
-            (campaign == 1 && !window->get_sm1_data()) ||
-            (campaign == 2 && !window->get_sm2_data()) ||
+        if (!window->get_path_valid() || campaign < SDL_LAUNCHER_CAMPAIGN_WC1 ||
+            campaign > SDL_LAUNCHER_CAMPAIGN_SM15 || (transfer && !campaign) ||
+            (campaign == SDL_LAUNCHER_CAMPAIGN_SM1 && !window->get_sm1_data()) ||
+            (campaign == SDL_LAUNCHER_CAMPAIGN_SM2 && !window->get_sm2_data()) ||
+            (campaign == SDL_LAUNCHER_CAMPAIGN_SM15 && !window->get_sm15_data()) ||
             (credits && !window->get_swc_credits()))
             return;
         std::error_code error;
@@ -1036,7 +1297,7 @@ int SdlRunLauncherGui(SdlLauncherOptions *options)
         /* Hide while the event loop still runs: on Linux the request takes
            effect only when the loop processes it, so hiding after the loop
            left the launcher on screen during the game. */
-        stop_calibration();
+        stop_joysticks();
         window->hide();
         slint::quit_event_loop();
     };
@@ -1046,8 +1307,8 @@ int SdlRunLauncherGui(SdlLauncherOptions *options)
     window->on_credits_requested([launch]() {
         launch(0, false, true);
     });
-    window->on_cancel_requested([stop_calibration]() {
-        stop_calibration();
+    window->on_cancel_requested([stop_joysticks]() {
+        stop_joysticks();
         slint::quit_event_loop();
     });
 
@@ -1073,9 +1334,6 @@ int SdlRunLauncherGui(SdlLauncherOptions *options)
             return;
         mt32Roms = selection;
         refresh_mt32_roms(*window, mt32Roms, mt32Model);
-        // Choosing ROMs asks for the MT-32.
-        window->set_music_device(SDL_LAUNCHER_MUSIC_MT32);
-        show_music_device(*window);
     });
     window->on_browse_requested([&window, &installations, stop_calibration, start_picker]() {
         if (!start_picker())
@@ -1086,7 +1344,7 @@ int SdlRunLauncherGui(SdlLauncherOptions *options)
     slint::run_event_loop();
     if (pickerInitialized)
         NFD_Quit();
-    stop_calibration();
+    stop_joysticks();
     window->hide();
     if (!accepted)
         return SDL_LAUNCHER_CANCELLED;
@@ -1101,10 +1359,14 @@ int SdlRunLauncherGui(SdlLauncherOptions *options)
     options->language = std::clamp(window->get_language_index(), 0, 3);
     options->enhancedRenderer = window->get_enhanced_renderer();
     options->egaDither = window->get_ega_dither();
+    options->hiResHudFonts = window->get_hires_hud_fonts();
+    options->frameInterpolation = window->get_frame_interpolation();
     options->cockpitlessView = window->get_cockpitless_view();
     options->cheatMode = window->get_cheat_mode();
     options->joystickRumble = window->get_joystick_rumble();
     options->joystickMode = std::max(0, window->get_joystick_mode_index());
+    options->joystickSource = std::clamp(window->get_joystick_source_index(),
+        static_cast<int>(SDL_PAD_SOURCE_AUTO), static_cast<int>(SDL_PAD_SOURCE_JOYSTICK));
     options->joystickAxes = std::max(0, window->get_joystick_axes_index());
     if (padBindingsKept) {
         const auto padBindings = pad_bindings(*window);
@@ -1113,6 +1375,10 @@ int SdlRunLauncherGui(SdlLauncherOptions *options)
     }
     options->joystickDeadZone = dead_zone_percent(window->get_joystick_dead_zone());
     options->musicDevice = std::clamp(window->get_music_device(), 0, 2);
+    options->soundDevice = std::clamp(window->get_sound_device(), 0, 2);
+    options->flightFpsHalves = std::clamp(window->get_flight_fps_halves(),
+                                          static_cast<int>(SDL_LAUNCHER_FLIGHT_FPS_MINIMUM),
+                                          static_cast<int>(SDL_LAUNCHER_FLIGHT_FPS_MAXIMUM));
     if (mt32Roms.size() < sizeof(options->mt32Roms))
         std::memcpy(options->mt32Roms, mt32Roms.c_str(), mt32Roms.size() + 1);
     options->swcDemo = window->get_swc_demo();

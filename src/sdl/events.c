@@ -568,6 +568,13 @@ static void SdlServiceKeyRepeats(void)
     }
 }
 
+static void (*g_pfnSdlFlightFpsSaver)(int halves);
+
+void SdlSetFlightFpsSaver(void (*saver)(int halves))
+{
+    g_pfnSdlFlightFpsSaver = saver;
+}
+
 static int SdlHandleKeyboardEvent(const SDL_KeyboardEvent *event)
 {
     int pressed;
@@ -575,8 +582,6 @@ static int SdlHandleKeyboardEvent(const SDL_KeyboardEvent *event)
     SDL_Keycode symbol;
 
     pressed = event->type == SDL_KEYDOWN;
-    if (pressed && event->repeat != 0)
-        return 0;
     if (pressed && event->repeat == 0 && event->keysym.sym == SDLK_q &&
         (event->keysym.mod & KMOD_GUI) != 0) {
         ShutdownGameWindow();
@@ -587,6 +592,27 @@ static int SdlHandleKeyboardEvent(const SDL_KeyboardEvent *event)
             SdlToggleFullscreen(event->windowID);
         return 0;
     }
+    /* In flight, [ and ] (the two keys right of P) lower and raise the frame
+       rate cap by half a frame a second, within 8 to 32, as the Kilrathi
+       Saga's Alt+N and Alt+M do, and the game's speed follows it. Holding
+       them repeats, and the game never sees the key, unless the player bound
+       an action to it. On release the launcher keeps the rate, as its
+       Speed choice. */
+    if ((event->keysym.scancode == SDL_SCANCODE_LEFTBRACKET ||
+         event->keysym.scancode == SDL_SCANCODE_RIGHTBRACKET) &&
+        (event->keysym.mod & (KMOD_CTRL | KMOD_ALT | KMOD_GUI | KMOD_MODE)) == 0 &&
+        SdlSpaceflightInputActive() &&
+        !SdlKeymapBindsKey(event->keysym.scancode, event->keysym.mod)) {
+        if (pressed)
+            ReportSpaceFlightMaxFps(event->keysym.scancode == SDL_SCANCODE_LEFTBRACKET
+                                        ? -0.5f : 0.5f);
+        else if (g_pfnSdlFlightFpsSaver != 0)
+            g_pfnSdlFlightFpsSaver((int)(fSpaceFlightFrameRate * 2.0f + 0.5f));
+        return 0;
+    }
+    /* Held keys repeat by SdlServiceKeyRepeats, not by the OS. */
+    if (pressed && event->repeat != 0)
+        return 0;
     /* In flight, rebound keys stand in for the keys the game reads. */
     key = SdlKeymapTranslateKey(event->keysym.scancode, event->keysym.mod, pressed);
     if (key == SDL_SCANCODE_UNKNOWN)

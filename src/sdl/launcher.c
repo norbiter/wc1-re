@@ -8,10 +8,14 @@
 #include <string.h>
 
 static const char *const g_apszSdlLauncherJoystickModes[] = {
-    "original", "4button-2axis", "4button-4axis", "custom"
+    "original", "4button-2axis", "4button-4axis", "custom", "steam-deck"
 };
 
 static const char *const g_apszSdlLauncherMusic[] = {
+    "default", "adlib", "mt32"
+};
+
+static const char *const g_apszSdlLauncherSound[] = {
     "default", "adlib", "mt32"
 };
 
@@ -78,7 +82,7 @@ typedef struct SdlFeatureOption {
 
 static void SdlApplyShieldFlash(const char *value) { (void)value; SdlShieldFlashEnable(); }
 static void SdlApplyGunRange(const char *value) { (void)value; SdlGunRangeEnable(); }
-static void SdlApplySmooth(const char *value) { (void)value; SdlSmoothEnable(); }
+static void SdlApplySmooth(const char *value) { (void)value; SdlSetFrameInterpolation(1); }
 static void SdlApplyDust(const char *value) { (void)value; SdlDustEnable(); }
 static void SdlApplyAspectless(const char *value) { (void)value; SdlAspectlessEnable(); }
 static void SdlApplyFineStars(const char *value) { (void)value; SdlFineStarsEnable(); }
@@ -114,8 +118,8 @@ static const SdlFeatureOption g_astSdlFeatures[] = {
     {"shield-flash", NULL, SDL_FEATURE_GROUP_DEFAULT, 0, SdlApplyShieldFlash,
      "Flash a hemisphere over a ship when its shields take a hit"},
     {"smooth", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplySmooth,
-     "Space flight at 60 fps (left off by --enhanced unless the display "
-     "runs at a multiple of 60 Hz)"},
+     "Space flight at the display's frame rate, drawn between the game's "
+     "steps (--interpolate is the same)"},
     {"dust", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyDust,
      "Fine space dust that streaks with speed"},
     {"aspectless", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyAspectless,
@@ -376,7 +380,7 @@ static int SdlFindShip3dDirectory(const char *named, char *directory,
 }
 
 /* Gives each feature not named on the command line its group's default and
- * turns on the features that end up on.  --smooth waits for the window. */
+ * turns on the features that end up on. */
 static void SdlResolveFeatures(int enhanced)
 {
     static char directory[1024];
@@ -442,48 +446,12 @@ static void SdlResolveFeatures(int enhanced)
             break;
         }
         g_aeSdlFeatureState[feature] = implied ? SDL_FEATURE_ON : SDL_FEATURE_OFF;
-        /* Only --smooth asks the display, which is not open yet. */
-        if (implied && option->apply == SdlApplySmooth)
-            g_aeSdlFeatureState[feature] = SDL_FEATURE_UNSET;
     }
     for (feature = 0; feature < SDL_FEATURE_COUNT; feature++) {
         option = &g_astSdlFeatures[feature];
-        if (g_aeSdlFeatureState[feature] == SDL_FEATURE_ON &&
-            option->apply != SdlApplySmooth)
+        if (g_aeSdlFeatureState[feature] == SDL_FEATURE_ON)
             option->apply(g_apszSdlFeatureValue[feature]);
     }
-}
-
-/* --smooth paces its presents by the clock and shows each on a vertical
- * blank, so it judders unless the display refreshes at a multiple of 60 Hz.
- * Named on the command line it is kept; implied, it waits for such a
- * display.  An unknown rate is given the benefit of the doubt. */
-static void SdlResolveSmooth(SDL_Window *window)
-{
-    SDL_DisplayMode mode;
-    int feature;
-    int display;
-    int remainder;
-
-    feature = SdlFindFeature("smooth");
-    if (g_aeSdlFeatureState[feature] == SDL_FEATURE_UNSET) {
-        display = SDL_GetWindowDisplayIndex(window);
-        if (display >= 0 && SDL_GetCurrentDisplayMode(display, &mode) == 0 &&
-            mode.refresh_rate > 0) {
-            remainder = mode.refresh_rate % 60;
-            if (remainder > 1 && remainder < 59) {
-                fprintf(stderr, "Smooth flight is off: the display runs at "
-                        "%d Hz (--smooth turns it on anyway).\n",
-                        mode.refresh_rate);
-                g_aeSdlFeatureState[feature] = SDL_FEATURE_OFF;
-                return;
-            }
-        }
-        SDL_ClearError();
-        g_aeSdlFeatureState[feature] = SDL_FEATURE_ON;
-    }
-    if (g_aeSdlFeatureState[feature] == SDL_FEATURE_ON)
-        SdlApplySmooth(NULL);
 }
 
 static int SdlParsePortArguments(int *argumentCount, char **arguments,
@@ -498,6 +466,8 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
     outputArgumentIndex = 1;
     memset(options, 0, sizeof(*options));
     options->joystickDeadZone = SDL_JOYSTICK_DEAD_ZONE_ORIGINAL;
+    options->soundDevice = SDL_LAUNCHER_SOUND_UNSET;
+    options->flightFpsHalves = SDL_LAUNCHER_FLIGHT_FPS_NORMAL;
 #ifdef WC1_STATIC_GUI
     *useLauncherGui = *argumentCount == 1;
 #else
@@ -519,8 +489,11 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
                 options->campaign = 1;
             else if (strcmp(argument + 11, "sm2") == 0)
                 options->campaign = 2;
+            else if (strcmp(argument + 11, "sm15") == 0)
+                options->campaign = SDL_LAUNCHER_CAMPAIGN_SM15;
             else {
-                fprintf(stderr, "Unknown campaign: %s (use wc1, sm1 or sm2).\n", argument + 11);
+                fprintf(stderr, "Unknown campaign: %s (use wc1, sm1, sm2 or sm15).\n",
+                        argument + 11);
                 return 0;
             }
         } else if (strncmp(argument, "--voices=", 9) == 0) {
@@ -618,6 +591,24 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
                 return 0;
             }
             options->explicitOptions |= SDL_LAUNCHER_EXPLICIT_MUSIC;
+        } else if (strncmp(argument, "--sound=", 8) == 0) {
+            options->soundDevice = SdlFindLauncherChoice(
+                argument + 8, g_apszSdlLauncherSound,
+                SDL_arraysize(g_apszSdlLauncherSound));
+            if (options->soundDevice < 0) {
+                fprintf(stderr, "Unknown sound: %s (use default, adlib or mt32)\n",
+                        argument + 8);
+                return 0;
+            }
+            options->explicitOptions |= SDL_LAUNCHER_EXPLICIT_SOUND;
+        } else if (strncmp(argument, "--flight-fps=", 13) == 0) {
+            options->flightFpsHalves = SdlParseFlightFps(argument + 13);
+            if (options->flightFpsHalves < 0) {
+                fprintf(stderr, "Invalid spaceflight frame rate: %s "
+                        "(8 to 32, in half steps)\n", argument + 13);
+                return 0;
+            }
+            options->explicitOptions |= SDL_LAUNCHER_EXPLICIT_FLIGHT_FPS;
         } else if (strncmp(argument, "--mt32-roms=", 12) == 0) {
             if (!SdlSetMt32RomArgument(argument + 12, options)) {
                 fprintf(stderr, "Invalid MT-32 ROM folder: %s\n", argument + 12);
@@ -646,6 +637,9 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
         } else if (strcmp(argument, "--ega") == 0) {
             options->egaDither = 1;
             options->explicitOptions |= SDL_LAUNCHER_EXPLICIT_EGA;
+        } else if (strcmp(argument, "--interpolate") == 0) {
+            /* Upstream's name for --smooth. */
+            SdlParseFeatureArgument("--smooth");
         } else if (argument[0] == '-' && argument[1] == '-' &&
                    (featureResult = SdlParseFeatureArgument(argument)) != 0) {
             if (featureResult < 0)
@@ -712,7 +706,7 @@ static int SdlOpenLauncherGui(SdlLauncherOptions *options)
 static int SdlApplyLauncherOptions(const SdlLauncherOptions *options)
 {
     char directory[SDL_LAUNCHER_DIRECTORY_CAPACITY];
-    if (options->campaign < 0 || options->campaign > 2 ||
+    if (options->campaign < 0 || options->campaign > SDL_LAUNCHER_CAMPAIGN_SM15 ||
         (options->swcDemo && options->campaign != 0) ||
         (options->transferPilot && !options->campaign)) {
         fprintf(stderr, "Invalid campaign for the selected game.\n");
@@ -722,16 +716,22 @@ static int SdlApplyLauncherOptions(const SdlLauncherOptions *options)
         fprintf(stderr, "Credits are available only for Super Wing Commander.\n");
         return 0;
     }
-    nLaunchCampaign = options->campaign;
+    /* SM1.5 is SM2 with its own files (SdlSelectSm2Files). */
+    bLaunchSm15 = options->campaign == SDL_LAUNCHER_CAMPAIGN_SM15;
+    nLaunchCampaign = bLaunchSm15 ? 2 : options->campaign;
     nPilotTransferState = options->transferPilot != 0;
     if (options->joystickMode < SDL_LAUNCHER_JOYSTICK_ORIGINAL ||
-        options->joystickMode > SDL_LAUNCHER_JOYSTICK_CUSTOM ||
+        options->joystickMode > SDL_LAUNCHER_JOYSTICK_STEAM_DECK ||
         options->joystickAxes < SDL_LAUNCHER_AXES_TWIN_STICK_ROLL ||
         options->joystickAxes > SDL_LAUNCHER_AXES_RUDDER_ROLL) {
         fprintf(stderr, "Invalid launcher joystick options.\n");
         return 0;
     }
     SdlSetJoystickMode(g_apszSdlLauncherJoystickModes[options->joystickMode]);
+    if (!SdlSetJoystickSource(options->joystickSource)) {
+        fprintf(stderr, "The GUI returned an invalid joystick source.\n");
+        return 0;
+    }
     SdlSetJoystickAxesMode(g_apszSdlLauncherJoystickAxes[options->joystickAxes]);
     SdlSetPadBindings(options->padBindings);
     if (!SdlSetJoystickDeadZone(options->joystickDeadZone)) {
@@ -746,6 +746,22 @@ static int SdlApplyLauncherOptions(const SdlLauncherOptions *options)
         return 0;
     }
     SdlSetMusicDevice(options->musicDevice);
+    if (options->soundDevice < SDL_LAUNCHER_SOUND_DEFAULT ||
+        options->soundDevice > SDL_LAUNCHER_SOUND_MT32) {
+        fprintf(stderr, "Invalid sound selection.\n");
+        return 0;
+    }
+    SdlSetSoundDevice(options->soundDevice);
+    if (options->flightFpsHalves < SDL_LAUNCHER_FLIGHT_FPS_MINIMUM ||
+        options->flightFpsHalves > SDL_LAUNCHER_FLIGHT_FPS_MAXIMUM) {
+        fprintf(stderr, "Invalid spaceflight frame rate.\n");
+        return 0;
+    }
+    fSpaceFlightFrameRate = options->flightFpsHalves / 2.0f;
+#ifdef WC1_STATIC_GUI
+    /* A rate set in flight is kept for the launcher's Speed choice. */
+    SdlSetFlightFpsSaver(SdlSaveLauncherFlightFps);
+#endif
     SdlSetMt32Roms(options->mt32Roms, options->mt32Model);
     if (*options->voiceCatalog && !options->swcDemo && !SdlLoadVoiceCatalog(options->voiceCatalog)) {
         fprintf(stderr, "Cannot load voices: %s\n", SDL_GetError());
@@ -776,6 +792,9 @@ static int SdlApplyLauncherOptions(const SdlLauncherOptions *options)
         SdlEnableJoystickRumble();
     if (options->egaDither && !options->swcDemo)
         SdlEnableEgaDither();
+    /* Fork: upstream's hi-res HUD fonts stay off (--ttf-text replaces
+       them).  The GUI's Smooth spaceflight box is --smooth. */
+    SdlSetFrameInterpolation(options->frameInterpolation && !options->swcDemo);
     if (options->cheatMode) {
         /* CheckLauncherAndConfig (0x401d10) applies this same combination
          * for Saga's Cheater registry setting. Both SDL data paths share it. */
@@ -867,10 +886,14 @@ int main(int argumentCount, char **arguments)
         launcherOptions.swcDemo = SdlFindSwcMissionData(swcPath, sizeof(swcPath)) &&
                                   !SdlHasWc1GameData();
     }
+    SdlResolveLauncherSound(&launcherOptions);
     if (!SdlApplyLauncherOptions(&launcherOptions))
         return 1;
     useEnhancedRenderer = launcherOptions.enhancedRenderer;
     SdlResolveFeatures(useEnhancedRenderer);
+    /* Interpolation drives WC1's own spaceflight loop only. */
+    if (launcherOptions.swcDemo)
+        SdlSetFrameInterpolation(0);
     if (useEnhancedRenderer)
         SdlSetVideoBackend(SDL_PORT_VIDEO_BACKEND_GL_SHARP_BILINEAR);
     if (launcherOptions.swcDemo) {
@@ -924,7 +947,6 @@ int main(int argumentCount, char **arguments)
     if (SdlUsingTownsJapanese())
 #endif
     SDL_StopTextInput();
-    SdlResolveSmooth(window);
     SdlCaptureInitialize();
     if (useLauncherGui && !SdlCaptureHiddenWindow()) {
         /* Hand focus from Slint's native event loop to the SDL game window. */
@@ -948,10 +970,12 @@ int main(int argumentCount, char **arguments)
     if (SdlUsingTownsData() && !SdlInitializeTownsAudio())
         fprintf(stderr, "FM Towns audio unavailable: %s\n", SDL_GetError());
     /* Kilrathi Saga data plays the intro with OriginFX in the enhanced
-     * renderer, and all its music with OriginFX on an AdLib or MT-32. */
+     * renderer, and its music or its sound effects with OriginFX on an
+     * AdLib or MT-32 when the player chose them. */
     if (usingDosData || (!SdlUsingTownsData() &&
                          (useEnhancedRenderer ||
-                          launcherOptions.musicDevice != SDL_LAUNCHER_MUSIC_DEFAULT))) {
+                          launcherOptions.musicDevice != SDL_LAUNCHER_MUSIC_DEFAULT ||
+                          launcherOptions.soundDevice != SDL_LAUNCHER_SOUND_DEFAULT))) {
         if (!SdlInitializeOriginFxAudio(usingDosData)) {
             if (usingDosData) {
                 fprintf(stderr,
@@ -959,7 +983,9 @@ int main(int argumentCount, char **arguments)
             } else {
                 fprintf(stderr, "%s is unavailable.\n",
                         launcherOptions.musicDevice != SDL_LAUNCHER_MUSIC_DEFAULT
-                            ? "DOS music" : "OriginFX intro music");
+                            ? "DOS music"
+                            : launcherOptions.soundDevice != SDL_LAUNCHER_SOUND_DEFAULT
+                            ? "DOS sound effects" : "OriginFX intro music");
             }
         }
     }

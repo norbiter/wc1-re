@@ -229,6 +229,17 @@ short TheEndFireWorks(Viewport *viewport, short count)
         if (aFireworksList[index].frame == -1) {
             emptyCount++;
         } else {
+#ifdef SDL_PORT
+            /* The simulator's Victory screen draws its title through the
+             * enhanced renderer; its fireworks follow, so they stay behind. */
+            if (viewport != &stSpaceBufferViewport ||
+                !SdlRecordSpaceSprite(
+                    viewport, aFireworksList[index].x,
+                    aFireworksList[index].y, pFireworkShape,
+                    (aFireworksList[index].frame +
+                     aFireworksList[index].variant * 8),
+                    0, 0x100, 0))
+#endif
             DrawSpriteDefault(
                 viewport, aFireworksList[index].x,
                 aFireworksList[index].y,
@@ -747,7 +758,7 @@ void DrawTargetRangeReadout(void)
         aeSpecialManeuvers[target] ==
         SPECIAL_MANEUVER_UNKNOWN_9) {
         acShipTargetTable[0] = -1;
-        InvalidateVduMode(1);
+        InvalidateVduMode(VDU_RIGHT);
         return;
     }
     if (target != -1 &&

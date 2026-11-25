@@ -25,8 +25,8 @@
  * trail is a fixed length in space, foreshortened with perspective, and
  * the same length at any frame rate.  A newly fired bolt's trail grows out
  * of the gun, never reaching back past where it was fired.  Under --smooth
- * the shot's position is already advanced for each extra frame, and the
- * trail's growth takes in the fraction of a tick too.
+ * the shot's position is already interpolated for each in-between frame,
+ * and the trail's growth takes in the fraction of a step too.
  *
  * Each shape gets one image, built on the CPU the first time a shot of it
  * is drawn, at SHOT_IMAGE_SCALE display pixels per game pixel; the GL layer
@@ -553,7 +553,7 @@ static int GetShotTrail(short obj, float *axisX, float *axisY,
      * down, so it tells how long the shot has flown. */
     ticks = (double)(aObjectTypeData[type].lifetime -
                      asObjectCounterArray[obj]) +
-            SdlSmoothFraction();
+            SdlFlightFrameFraction();
     if (ticks > SHOT_TRAIL_TICKS)
         ticks = SHOT_TRAIL_TICKS;
     if (ticks <= 0.0)

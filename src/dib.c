@@ -25,7 +25,10 @@ static int nFrameDeadlineMs = 0; /* 0x0046b1bc */
 static int DAT_0046b1c0 = 0; /* 0x0046b1c0 */
 static int nPreviousFrameTimeMs = 0; /* 0x0046b1c4 */
 static int bSpaceFlightFrameTiming = 0; /* 0x0046b1c8 */
-static float fSpaceFlightFrameRate = 20.0f; /* 0x0046b1cc */
+#ifndef SDL_PORT
+static
+#endif
+float fSpaceFlightFrameRate = 20.0f; /* 0x0046b1cc */
 static float fCinematicFrameRate = 16.0f; /* 0x0046b1d0 */
 /* Nothing in the shipped executable references this zero word either. */
 static int DAT_0046b1d4 = 0; /* 0x0046b1d4 */
@@ -127,6 +130,7 @@ void ThrottleFrameAndDrawFps(HDC dc)
     }
 
 #ifdef SDL_PORT
+    SdlPresentInterpolatedFlightFrames(nFrameDeadlineMs, nFrameIntervalMs);
     if (stMouseCursorState.viewport != 0 &&
         stMouseCursorState.viewport->pixels == pDIBImage) {
         while (timeGetTime() < (DWORD)nFrameDeadlineMs) {
@@ -193,13 +197,6 @@ void ReportSpaceFlightMaxFps(float adjustment)
     if (bSpaceFlightFrameTiming == 1)
         SetSpaceFlightFrameTiming();
 }
-
-#ifdef SDL_PORT
-long SdlGetSpaceFlightTickIntervalMs(void)
-{
-    return (long)(1000.0 / fSpaceFlightFrameRate);
-}
-#endif
 
 /* Function start: 0x4320E0 */
 void SetSpaceFlightFrameTiming(void)
@@ -714,7 +711,9 @@ void DIBslamReal(void)
                 pPrimarySurface, surface.lpSurface);
         }
 #else
-        if (!SdlPresentIndexedFrame(pDIBImage,
+        /* An interpolated spaceflight frame is presented by the throttle. */
+        if (!SdlFlightFrameDeferred() &&
+            !SdlPresentIndexedFrame(pDIBImage,
                                        abDIBPaletteQuads))
             DIBerror("DIBslamReal", -1);
 #endif

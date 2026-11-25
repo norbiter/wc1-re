@@ -211,6 +211,12 @@ int SdlCaptureFrameWanted(void);
 void SdlCaptureFrameRgb(const unsigned char *rgb, int width, int height);
 void SdlCaptureFrameArgb(const Uint32 *pixels, int width, int height);
 void SdlCaptureAudio(const unsigned char *samples, unsigned int bytes);
+/* Spaceflight's frame rate cap (src/dib.c), which the game's speed follows:
+ * 20 in the Kilrathi Saga, 8 to 32 in half steps. */
+extern float fSpaceFlightFrameRate;
+/* Keeps the rate the player sets in flight with [ and ], as half frames a
+ * second; the GUI launcher saves it with its settings. */
+void SdlSetFlightFpsSaver(void (*saver)(int halves));
 /* Slot 8 is always reserved in the SDL barracks, even with autosave off. */
 #define SDL_AUTOSAVE_SLOT 7
 void SdlConfigureAutosave(int enabled);
@@ -266,6 +272,37 @@ void SdlBeginSpaceFrame(
     int fullViewportCopy, unsigned char clearColour);
 void SdlCompleteSpaceFrame(void);
 void SdlCancelSpaceFrame(void);
+/* The enhanced renderer's hi-res HUD text: RunSpaceFlight, and the
+   simulator around it, marks the flight, DrawFontGlyph records HUD-font
+   glyphs, and the viewport copies move the ones drawn off screen. */
+void SdlBeginHiResHudFlight(void);
+void SdlEndHiResHudFlight(void);
+/* Spaceflight frame interpolation (src/sdl/interpolation.c). */
+void SdlSetFrameInterpolation(int enabled);
+void SdlResetFrameInterpolation(void);
+void SdlCaptureFlightPoses(void);
+void SdlSnapshotFlightChildren(void);
+void SdlCaptureFlightView(void);
+void SdlDeferFlightFrame(void);
+int SdlFlightFrameDeferred(void);
+int SdlDrawingInterpolatedFrame(void);
+double SdlFlightFrameFraction(void);
+void SdlDrawInterpolatedFlightFrame(int alpha);
+void SdlPresentInterpolatedFlightFrames(long deadline, long interval);
+int SdlPresentCurrentFrame(const unsigned char *pixels);
+void SdlResetHiResHudFont(void);
+int SdlBeginHiResGlyph(const struct Viewport *view, int cursorX, int y,
+                       int width, int height, unsigned char character,
+                       unsigned char colour, unsigned char background,
+                       int centered);
+void SdlEndHiResGlyph(void);
+void SdlCopyHiResGlyphs(const struct Viewport *source,
+                        const struct Viewport *destination);
+/* The HUD drew the flight pointer into the space buffer. */
+void SdlNoteHiResFlightPointer(void);
+void SdlCopyHiResGlyphRuns(const struct Viewport *source,
+                           const struct Viewport *destination, int originX,
+                           int originY);
 void SdlSetThrusterScreenPosition(short object, float x, float y);
 void SdlGetThrusterScreenPosition(short object, float *x, float *y);
 struct Shape;
@@ -338,14 +375,6 @@ void SdlTtfTextBeginGlyph(const struct TextContext *context,
                           unsigned char character, int height, int width,
                           int y);
 void SdlTtfTextEndGlyph(const struct TextContext *context);
-void SdlSmoothEnable(void);
-int SdlSmoothSubFrame(void);
-double SdlSmoothFraction(void);
-void SdlSmoothHudBegin(void);
-void SdlSmoothHudEnd(void);
-void SdlSmoothBeginPresent(int index);
-int SdlSmoothFlightSubFrames(void);
-long SdlGetSpaceFlightTickIntervalMs(void);
 void SdlAiThrottleEnable(int ships);
 void SdlAiThrottleBeginTick(void);
 int SdlAiThrottleDefers(short obj);
@@ -415,6 +444,7 @@ BOOL SdlReadJoystickAxisRange(unsigned int device,
                                  unsigned int *yMinimum,
                                  unsigned int *yMaximum);
 int SdlSetJoystickMode(const char *name);
+int SdlSetJoystickSource(int source);
 int SdlSetJoystickAxesMode(const char *name);
 /* The Custom joystick mode's "control=function" lines (src/sdl/pad_bindings.h),
  * after the axis layout, whose bindings are the defaults. */
@@ -464,6 +494,8 @@ SDL_Scancode SdlKeymapTranslateKey(SDL_Scancode key, Uint16 modifiers, int press
 const Uint8 *SdlKeymapKeyboardState(const Uint8 *keys);
 /* 1 or 0 when the full-screen keys were changed, -1 when they were not. */
 int SdlKeymapFullscreenShortcut(SDL_Scancode key, Uint16 modifiers);
+/* In flight, whether an action the player bound takes this key press. */
+int SdlKeymapBindsKey(SDL_Scancode key, Uint16 modifiers);
 /* In flight with changed mouse bindings: which of SDL's buttons hold the
  * game's guns (primary) and afterburner (secondary) buttons, and the key a
  * bound mouse button or wheel step presses (SDL_SCANCODE_UNKNOWN for none). */
@@ -509,6 +541,9 @@ void SdlSetCampaignShips(void);
 extern int nPilotTransferState;
 extern int nPilotTransferCampaign;
 extern int nLaunchCampaign;
+/* SM1.5, the fan port of Super Wing Commander's Covert Missions, launches
+ * as SM2 with four files of its own (SdlSelectSm2Files). */
+extern int bLaunchSm15;
 int SdlTransferPilot(short slot, short campaign);
 struct CampaignState;
 int SdlValidateExpansionSave(const struct CampaignState *campaign);
@@ -677,6 +712,15 @@ enum {
 };
 void SdlSetMusicDevice(int device);
 int SdlGetMusicDevice(void);
+/* The sound effects the player chose, apart from the music: the
+ * installation's own (Kilrathi Saga's digital effects, or DOS AdLib), or
+ * the DOS effects on an AdLib or an MT-32. */
+enum {
+    SDL_PORT_SOUND_INSTALLED = 0,
+    SDL_PORT_SOUND_ADLIB = 1,
+    SDL_PORT_SOUND_MT32 = 2
+};
+void SdlSetSoundDevice(int device);
 int SdlUsingOriginFxMusic(void);
 int SdlUsingOriginFxSoundEffects(void);
 int SdlOriginFxMusicCommand(int track, int command);
@@ -685,6 +729,7 @@ void SdlStopOriginFxMusic(void);
 void SdlStopDosSoundEffects(void);
 void SdlShutdownOriginFxAudio(void);
 void SdlCompleteDosInstallTable(struct DiskFileRecord *records);
+void SdlSelectSm2Files(struct DiskFileRecord *records);
 
 #define GetTickCount SdlGetTicks
 #define GetAsyncKeyState SdlGetAsyncKeyState

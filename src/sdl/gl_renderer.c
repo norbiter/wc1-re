@@ -248,8 +248,9 @@ typedef enum GlFrameState {
 } GlFrameState;
 
 /* A full world-object list may be followed by four three-part launch doors.
-   The title logo uses only three additional entries. */
-#define GL_RENDERER_RECORDED_SPRITE_CAPACITY (SPACE_OBJECT_COUNT + 12)
+   The title logo uses only three additional entries, and the simulator's
+   Victory screen up to 30 fireworks and its title's letters. */
+#define GL_RENDERER_RECORDED_SPRITE_CAPACITY (SPACE_OBJECT_COUNT + 12 + 30 + 16)
 #define GL_RENDERER_SPRITE_VERTEX_COUNT (GL_RENDERER_RECORDED_SPRITE_CAPACITY * 6)
 #define GL_RENDERER_SPRITE_ATLAS_MAX_SIZE 2048
 #define GL_RENDERER_SPRITE_ATLAS_LAYER_CAPACITY 4
@@ -735,12 +736,13 @@ static void ReleaseRendererStorage(void)
     ResetSpriteAtlasCache();
 }
 
-static void CopyBaseWithoutMouse(unsigned char *destination,
-                                 const unsigned char *pixels)
+/* The frame as the game drew it, without the menus' mouse cursor. */
+void SdlCopyFrameWithoutMouse(unsigned char *destination,
+                              const unsigned char *pixels)
 {
     Viewport viewport;
 
-    memcpy(destination, pixels, sizeof(g_renderer.spaceFrameBase));
+    memcpy(destination, pixels, SDL_PORT_FRAME_WIDTH * SDL_PORT_FRAME_HEIGHT);
     if (bEventMouseCursorDrawnFlag == 0 ||
         stMouseCursorState.viewport == 0 ||
         stMouseCursorState.shape == 0 ||
@@ -754,6 +756,13 @@ static void CopyBaseWithoutMouse(unsigned char *destination,
                             nMousePointerDrawnY,
                             stMouseCursorState.shape,
                             stMouseCursorState.frame);
+}
+
+/* Fork: upstream's hi-res HUD layer (src/sdl/hires_hud.c) is never drawn;
+   the fork's --ttf-text replaces it. */
+int SdlGlOverlayReady(void)
+{
+    return 0;
 }
 
 static void *LoadGlFunction(const char *name, int *functionsAvailable)
@@ -1756,7 +1765,7 @@ static void PrepareTtfTextFrame(const unsigned char *pixels)
                                &viewportBottom, &viewportWidth,
                                &viewportHeight);
     SdlGetFrameGeometry(&frameWidth, &frameHeight, 0, 0);
-    CopyBaseWithoutMouse(g_renderer.textMouseFree, pixels);
+    SdlCopyFrameWithoutMouse(g_renderer.textMouseFree, pixels);
     SdlTtfTextPrepare(pixels, g_renderer.textMouseFree,
                       g_renderer.presentedFrame,
                       (float)viewportWidth / frameWidth,
@@ -2523,13 +2532,13 @@ int SdlGlRendererPresent(const unsigned char *pixels,
        but is discarded as soon as the underlying game frame changes. */
     drawSprites = 0;
     if (g_renderer.frameState == GL_RENDERER_FRAME_COMPLETE) {
-        CopyBaseWithoutMouse(g_renderer.spaceFrameBase, pixels);
+        SdlCopyFrameWithoutMouse(g_renderer.spaceFrameBase, pixels);
         g_renderer.hasLayerSnapshot = 1;
         g_renderer.frameState = GL_RENDERER_FRAME_IDLE;
         drawSprites = 1;
     } else if (g_renderer.frameState == GL_RENDERER_FRAME_IDLE &&
                g_renderer.hasLayerSnapshot) {
-        CopyBaseWithoutMouse(g_renderer.presentedFrame, pixels);
+        SdlCopyFrameWithoutMouse(g_renderer.presentedFrame, pixels);
         if (memcmp(g_renderer.spaceFrameBase, g_renderer.presentedFrame,
                    sizeof(g_renderer.spaceFrameBase)) == 0) {
             drawSprites = 1;
