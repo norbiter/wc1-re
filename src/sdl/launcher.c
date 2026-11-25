@@ -82,7 +82,7 @@ typedef struct SdlFeatureOption {
 
 static void SdlApplyShieldFlash(const char *value) { (void)value; SdlShieldFlashEnable(); }
 static void SdlApplyGunRange(const char *value) { (void)value; SdlGunRangeEnable(); }
-static void SdlApplySmooth(const char *value) { (void)value; SdlSetFrameInterpolation(1); }
+static void SdlApplyInterpolate(const char *value) { (void)value; SdlSetFrameInterpolation(1); }
 static void SdlApplyDust(const char *value) { (void)value; SdlDustEnable(); }
 static void SdlApplyAspectless(const char *value) { (void)value; SdlAspectlessEnable(); }
 static void SdlApplyFineStars(const char *value) { (void)value; SdlFineStarsEnable(); }
@@ -117,9 +117,9 @@ static const SdlFeatureOption g_astSdlFeatures[] = {
      "player can't"},
     {"shield-flash", NULL, SDL_FEATURE_GROUP_DEFAULT, 0, SdlApplyShieldFlash,
      "Flash a hemisphere over a ship when its shields take a hit"},
-    {"smooth", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplySmooth,
+    {"interpolate", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyInterpolate,
      "Space flight at the display's frame rate, drawn between the game's "
-     "steps (--interpolate is the same)"},
+     "steps (--smooth is the same)"},
     {"dust", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyDust,
      "Fine space dust that streaks with speed"},
     {"aspectless", NULL, SDL_FEATURE_GROUP_ENHANCED, 0, SdlApplyAspectless,
@@ -637,9 +637,9 @@ static int SdlParsePortArguments(int *argumentCount, char **arguments,
         } else if (strcmp(argument, "--ega") == 0) {
             options->egaDither = 1;
             options->explicitOptions |= SDL_LAUNCHER_EXPLICIT_EGA;
-        } else if (strcmp(argument, "--interpolate") == 0) {
-            /* Upstream's name for --smooth. */
-            SdlParseFeatureArgument("--smooth");
+        } else if (strcmp(argument, "--smooth") == 0) {
+            /* The fork's earlier name for --interpolate. */
+            SdlParseFeatureArgument("--interpolate");
         } else if (argument[0] == '-' && argument[1] == '-' &&
                    (featureResult = SdlParseFeatureArgument(argument)) != 0) {
             if (featureResult < 0)
@@ -793,7 +793,7 @@ static int SdlApplyLauncherOptions(const SdlLauncherOptions *options)
     if (options->egaDither && !options->swcDemo)
         SdlEnableEgaDither();
     /* Fork: upstream's hi-res HUD fonts stay off (--ttf-text replaces
-       them).  The GUI's Smooth spaceflight box is --smooth. */
+       them).  The GUI's Smooth spaceflight box is --interpolate. */
     SdlSetFrameInterpolation(options->frameInterpolation && !options->swcDemo);
     if (options->cheatMode) {
         /* CheckLauncherAndConfig (0x401d10) applies this same combination

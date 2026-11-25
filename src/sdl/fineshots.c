@@ -24,7 +24,7 @@
  * from the shot's position less its velocity times those ticks, so the
  * trail is a fixed length in space, foreshortened with perspective, and
  * the same length at any frame rate.  A newly fired bolt's trail grows out
- * of the gun, never reaching back past where it was fired.  Under --smooth
+ * of the gun, never reaching back past where it was fired.  Under --interpolate
  * the shot's position is already interpolated for each in-between frame,
  * and the trail's growth takes in the fraction of a step too.
  *
