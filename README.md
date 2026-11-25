@@ -166,6 +166,7 @@ line keeps its setting whatever the bundles say:
 
 | Fix or feature | Default / switch |
 | --- | --- |
+| A quick press of N or Escape acts once: keys repeat only after half a second, as on Windows, Escape never repeats, and leaving the nav map with Escape no longer pauses the flight | always on |
 | Protected transports are no longer blown up for flying through an enemy-held nav point while you're far away (mission 7-1 scored the second transport as lost although it survived) | always on |
 | Autopilot waits ("Drayman Inbound") while a friendly ship you're meant to meet is still due to jump in at the current nav point; the original left it behind, so in mission 7-1 clearing the Jalthi early and autopiloting home scored the second transport as lost | always on |
 | Ship objectives (such as the Fralthi in mission 8-2) are sighted when the ship itself is on screen within range; the original checked whether your wingman was on screen, so with no wingman, or one out of view, the sighting never counted | always on |
